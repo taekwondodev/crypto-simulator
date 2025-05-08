@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
 )
 
 type Block struct {
 	Index        int
 	Timestamp    time.Time
 	PreviousHash string
-	Transactions []string
+	Transactions []*transaction.Transaction
 	Nonce        int
 	Hash         string
 }
@@ -23,12 +25,22 @@ func CreateGenesisBlock() *Block {
 		Index:        0,
 		Timestamp:    time.Now(),
 		PreviousHash: "0", // Genesis block has no previous hash
-		Transactions: []string{"Genesis Transaction"},
+		Transactions: []*transaction.Transaction{},
 		Nonce:        0,
 	}
 	genesisBlock.Hash = calculateHash(genesisBlock)
 
 	return genesisBlock
+}
+
+func NewBlock(index int, previousHash string, transactions []*transaction.Transaction) *Block {
+	return &Block{
+		Index:        index,
+		Timestamp:    time.Now(),
+		PreviousHash: previousHash,
+		Transactions: transactions,
+		Nonce:        0,
+	}
 }
 
 func (b *Block) MineBlock(difficulty int) {

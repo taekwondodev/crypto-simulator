@@ -1,9 +1,8 @@
 package blockchain
 
 import (
-	"time"
-
 	"github.com/taekwondodev/crypto-simulator/pkg/block"
+	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
 )
 
 type Blockchain struct {
@@ -16,15 +15,9 @@ func NewBlockchain() *Blockchain {
 	}
 }
 
-func (bc *Blockchain) AddBlock(transactions []string, difficulty int) {
+func (bc *Blockchain) AddBlock(transactions []*transaction.Transaction, difficulty int) {
 	prevBlock := bc.Blocks[len(bc.Blocks)-1]
-	newBlock := &block.Block{
-		Index:        prevBlock.Index + 1,
-		Timestamp:    time.Now(),
-		PreviousHash: prevBlock.Hash,
-		Transactions: transactions,
-		Nonce:        0,
-	}
+	newBlock := block.NewBlock(prevBlock.Index+1, prevBlock.Hash, transactions)
 	newBlock.MineBlock(difficulty)
 	bc.Blocks = append(bc.Blocks, newBlock)
 }
@@ -43,11 +36,6 @@ func (bc *Blockchain) VerifyChain(difficulty int) bool {
 		}
 	}
 	return true
-}
-
-func (bc *Blockchain) TestModifyTransaction(blockIndex int, txIndex int, newTx string) {
-	block := bc.Blocks[blockIndex]
-	block.Transactions[txIndex] = newTx
 }
 
 func (bc *Blockchain) Print() {

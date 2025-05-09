@@ -1,45 +1,51 @@
 package blockchain
 
 import (
+	"log"
+
 	"github.com/taekwondodev/crypto-simulator/pkg/block"
-	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
+	"go.etcd.io/bbolt"
+)
+
+const (
+	dbFile       = "blockchain.db"
+	utxoBucket   = "utxo"
+	blocksBucket = "blocks"
 )
 
 type Blockchain struct {
-	Blocks []*block.Block
+	tip []byte
+	db  *bbolt.DB
 }
 
-func NewBlockchain() *Blockchain {
-	return &Blockchain{
-		[]*block.Block{block.CreateGenesisBlock()},
+func New() *Blockchain {
+	db, err := bbolt.Open(dbFile, 0600, nil)
+	if err != nil {
+		log.Panic(err)
 	}
-}
 
-func (bc *Blockchain) AddBlock(transactions []*transaction.Transaction, difficulty int) {
-	prevBlock := bc.Blocks[len(bc.Blocks)-1]
-	newBlock := block.NewBlock(prevBlock.Index+1, prevBlock.Hash, transactions)
-	newBlock.MineBlock(difficulty)
-	bc.Blocks = append(bc.Blocks, newBlock)
-}
-
-func (bc *Blockchain) VerifyChain(difficulty int) bool {
-	for i := 1; i < len(bc.Blocks); i++ {
-		prevBlock := bc.Blocks[i-1]
-		currentBlock := bc.Blocks[i]
-
-		if currentBlock.PreviousHash != prevBlock.Hash {
-			return false
+	var tip []byte
+	err = db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(blocksBucket))
+		if b == nil {
+			genesis := block.New(nil, []byte("0"), 0)
+			b, _ := tx.CreateBucket([]byte(blocksBucket))
+			b.Put(genesis.Hash, genesis.Serialize())
+			b.Put([]byte("l"), genesis.Hash)
+			tip = genesis.Hash
+		} else {
+			tip = b.Get([]byte("l"))
 		}
+		return nil
+	})
 
-		if !currentBlock.CheckHashBlock(difficulty) {
-			return false
-		}
+	if err != nil {
+		log.Panic(err)
 	}
-	return true
+
+	return &Blockchain{tip, db}
 }
 
-func (bc *Blockchain) Print() {
-	for _, block := range bc.Blocks {
-		block.Print()
-	}
+func (bc *Blockchain) Close() {
+	bc.db.Close()
 }

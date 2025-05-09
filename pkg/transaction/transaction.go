@@ -1,73 +1,70 @@
 package transaction
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
+	"bytes"
 	"crypto/sha256"
-	"math/big"
+	"encoding/gob"
+	"log"
+
+	"github.com/taekwondodev/crypto-simulator/pkg/utxo"
 )
 
 type Transaction struct {
-	ID        []byte
-	Inputs    []TxInput
-	Outputs   []TxOutput
-	Signature []byte
+	ID      []byte
+	Inputs  []utxo.TxInput
+	Outputs []utxo.TxOutput
 }
 
-type TxInput struct {
-	TxID      []byte
-	OutIndex  int
-	Signature []byte
-	PubKey    []byte
-}
-
-type TxOutput struct {
-	Value      int
-	PubKeyHash []byte
-}
-
-func NewTransaction(inputs []TxInput, outputs []TxOutput, privateKey *ecdsa.PrivateKey) *Transaction {
-	t := &Transaction{
-		ID:        []byte{},
-		Inputs:    inputs,
-		Outputs:   outputs,
-		Signature: []byte{},
+// First transaction in the blockchain, usually called the coinbase transaction
+func NewCoinBaseTx(to string, value int) *Transaction {
+	tx := &Transaction{
+		Outputs: []utxo.TxOutput{
+			{Value: value, PubKeyHash: []byte(to)},
+		},
 	}
 
-	t.sign(privateKey)
-
-	return t
+	tx.ID = tx.hash()
+	return tx
 }
 
-func (tx *Transaction) sign(privateKey *ecdsa.PrivateKey) {
-	dataHash := sha256.Sum256(tx.serializeForSigning())
-	r, s, _ := ecdsa.Sign(rand.Reader, privateKey, dataHash[:])
-	tx.Signature = append(r.Bytes(), s.Bytes()...)
-}
-
-func (tx *Transaction) serializeForSigning() []byte {
-	var data []byte
-	for _, input := range tx.Inputs {
-		data = append(data, input.TxID...)
-		data = append(data, byte(input.OutIndex))
+func New(inputs []utxo.TxInput, outputs []utxo.TxOutput) *Transaction {
+	tx := &Transaction{
+		Inputs:  inputs,
+		Outputs: outputs,
 	}
-	for _, output := range tx.Outputs {
-		data = append(data, byte(output.Value))
-		data = append(data, output.PubKeyHash...)
-	}
-	return data
+
+	tx.ID = tx.hash()
+	return tx
 }
 
-func (tx *Transaction) Verify() bool {
-	dataHash := sha256.Sum256(tx.serializeForSigning())
-	r := new(big.Int).SetBytes(tx.Signature[:len(tx.Signature)/2])
-	s := new(big.Int).SetBytes(tx.Signature[len(tx.Signature)/2:])
+func (tx *Transaction) hash() []byte {
+	var hash [32]byte
+	txCopy := *tx
+	txCopy.ID = []byte{}
+	hash = sha256.Sum256(txCopy.Serialize())
+	return hash[:]
+}
 
-	pubKey := tx.Inputs[0].PubKey
-	x := new(big.Int).SetBytes(pubKey[:len(pubKey)/2])
-	y := new(big.Int).SetBytes(pubKey[len(pubKey)/2:])
-	publicKey := ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}
+func (tx *Transaction) IsCoinBase() bool {
+	return len(tx.Inputs) == 0
+}
 
-	return ecdsa.Verify(&publicKey, dataHash[:], r, s)
+func (tx *Transaction) Serialize() []byte {
+	var buffer bytes.Buffer
+	encoder := gob.NewEncoder(&buffer)
+	err := encoder.Encode(tx)
+	if err != nil {
+		log.Panic(err)
+	}
+	return buffer.Bytes()
+}
+
+func Deserialize(data []byte) *Transaction {
+	var tx Transaction
+	decoder := gob.NewDecoder(bytes.NewReader(data))
+	err := decoder.Decode(&tx)
+	if err != nil {
+		log.Panic("Failed to deserialize transaction:", err)
+	}
+	return &tx
 }

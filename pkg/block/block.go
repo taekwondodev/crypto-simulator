@@ -1,9 +1,12 @@
 package block
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"encoding/gob"
 	"encoding/hex"
-	"fmt"
+	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,84 +14,79 @@ import (
 )
 
 type Block struct {
-	Index        int
 	Timestamp    time.Time
-	PreviousHash string
+	PreviousHash []byte
 	Transactions []*transaction.Transaction
 	Nonce        int
-	Hash         string
+	Difficulty   int
+	Hash         []byte
 }
 
-// The first block in the blockchain
-func CreateGenesisBlock() *Block {
-	genesisBlock := &Block{
-		Index:        0,
+func New(transactions []*transaction.Transaction, prevHash []byte, difficulty int) *Block {
+	block := &Block{
 		Timestamp:    time.Now(),
-		PreviousHash: "0", // Genesis block has no previous hash
-		Transactions: []*transaction.Transaction{},
-		Nonce:        0,
-	}
-	genesisBlock.Hash = calculateHash(genesisBlock)
-
-	return genesisBlock
-}
-
-func NewBlock(index int, previousHash string, transactions []*transaction.Transaction) *Block {
-	return &Block{
-		Index:        index,
-		Timestamp:    time.Now(),
-		PreviousHash: previousHash,
+		PreviousHash: prevHash,
 		Transactions: transactions,
 		Nonce:        0,
+		Difficulty:   difficulty,
 	}
+	block.Hash = block.calculateHash()
+	return block
 }
 
-func (b *Block) MineBlock(difficulty int) {
-	prefix := strings.Repeat("0", difficulty) // Difficulty based on 0s
+func (b *Block) Mine() {
+	target := strings.Repeat("0", b.Difficulty)
 	for {
-		b.Hash = calculateHash(b)
-		if strings.HasPrefix(b.Hash, prefix) {
+		hashStr := hex.EncodeToString(b.Hash)
+		if strings.HasPrefix(hashStr, target) {
 			break
 		}
 		b.Nonce++
+		b.Hash = b.calculateHash()
 	}
 }
 
-func (b *Block) CheckHashBlock(difficulty int) bool {
-	prefix := strings.Repeat("0", difficulty)
-	return isValidHash(b, prefix)
-}
-
-func calculateHash(b *Block) string {
-	data := fmt.Sprintf("%d%s%s%v%d",
-		b.Index,
-		b.Timestamp.String(),
-		b.PreviousHash,
-		b.Transactions,
-		b.Nonce,
+func (b *Block) calculateHash() []byte {
+	data := bytes.Join(
+		[][]byte{
+			[]byte(b.Timestamp.String()),
+			b.PreviousHash,
+			serializeTransactions(b.Transactions),
+			[]byte(strconv.Itoa(b.Nonce)),
+			[]byte(strconv.Itoa(b.Difficulty)),
+		},
+		[]byte{},
 	)
-	hash := sha256.Sum256([]byte(data))
-	return hex.EncodeToString(hash[:])
+	hash := sha256.Sum256(data)
+	return hash[:]
 }
 
-func isValidHash(b *Block, prefix string) bool {
-	if b.Hash != calculateHash(b) {
-		return false
+func serializeTransactions(txs []*transaction.Transaction) []byte {
+	var buffer bytes.Buffer
+	encoder := gob.NewEncoder(&buffer)
+	err := encoder.Encode(txs)
+	if err != nil {
+		log.Panic("Failed to serialize transactions:", err)
 	}
-
-	if !strings.HasPrefix(b.Hash, prefix) {
-		return false
-	}
-
-	return true
+	return buffer.Bytes()
 }
 
-func (b *Block) Print() {
-	fmt.Println("Index:", b.Index)
-	fmt.Println("Timestamp:", b.Timestamp.String())
-	fmt.Println("Previous Hash:", b.PreviousHash)
-	fmt.Println("Transactions:", b.Transactions)
-	fmt.Println("Nonce:", b.Nonce)
-	fmt.Println("Hash:", b.Hash)
-	fmt.Println("-------------------")
+func (b *Block) Serialize() []byte {
+	var buffer bytes.Buffer
+	encoder := gob.NewEncoder(&buffer)
+	err := encoder.Encode(b)
+	if err != nil {
+		log.Panic("Failed to serialize block:", err)
+	}
+	return buffer.Bytes()
+}
+
+func Deserialize(data []byte) *Block {
+	var block Block
+	decoder := gob.NewDecoder(bytes.NewReader(data))
+	err := decoder.Decode(&block)
+	if err != nil {
+		log.Panic("Failed to deserialize block:", err)
+	}
+	return &block
 }

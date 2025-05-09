@@ -14,6 +14,7 @@ import (
 )
 
 type Block struct {
+	Height       int
 	Timestamp    time.Time
 	PreviousHash []byte
 	Transactions []*transaction.Transaction
@@ -22,8 +23,9 @@ type Block struct {
 	Hash         []byte
 }
 
-func New(transactions []*transaction.Transaction, prevHash []byte, difficulty int) *Block {
+func New(height int, transactions []*transaction.Transaction, prevHash []byte, difficulty int) *Block {
 	block := &Block{
+		Height:       height,
 		Timestamp:    time.Now(),
 		PreviousHash: prevHash,
 		Transactions: transactions,
@@ -44,6 +46,33 @@ func (b *Block) Mine() {
 		b.Nonce++
 		b.Hash = b.calculateHash()
 	}
+}
+
+func (b *Block) Validate(prevBlock *Block) bool {
+	// Verify hash
+	if !bytes.Equal(b.PreviousHash, prevBlock.Hash) {
+		return false
+	}
+
+	// Verify the hash value matches the block content
+	calculatedHash := b.calculateHash()
+	if !bytes.Equal(calculatedHash, b.Hash) {
+		return false
+	}
+
+	// Verify proof of work
+	target := strings.Repeat("0", b.Difficulty)
+	hashStr := hex.EncodeToString(b.Hash)
+	if !strings.HasPrefix(hashStr, target) {
+		return false
+	}
+
+	// Verify height increases by 1
+	if b.Height != prevBlock.Height+1 {
+		return false
+	}
+
+	return true
 }
 
 func (b *Block) calculateHash() []byte {

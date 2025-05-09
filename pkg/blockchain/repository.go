@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"math/big"
 
 	"github.com/taekwondodev/crypto-simulator/pkg/block"
@@ -16,79 +15,66 @@ import (
 	"go.etcd.io/bbolt"
 )
 
-func (bc *Blockchain) AddBlock(txs []*transaction.Transaction, difficulty int) {
-	var lastHash []byte
+func getLastHash(tx *bbolt.Tx, lastHash *[]byte) error {
+	b := tx.Bucket([]byte(blocksBucket))
+	*lastHash = b.Get([]byte("l"))
+	return nil
+}
 
-	err := bc.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(blocksBucket))
-		lastHash = b.Get([]byte("l"))
-		return nil
-	})
-	if err != nil {
-		log.Panic("Failed to get last hash:", err)
+func createGenesisBlock(tx *bbolt.Tx, tip *[]byte) error {
+	b := tx.Bucket([]byte(blocksBucket))
+	if b == nil {
+		genesis := block.New(nil, []byte("0"), 0)
+		b, _ := tx.CreateBucket([]byte(blocksBucket))
+		b.Put(genesis.Hash, genesis.Serialize())
+		b.Put([]byte("l"), genesis.Hash)
+		*tip = genesis.Hash
+	} else {
+		*tip = b.Get([]byte("l"))
 	}
+	return nil
+}
 
-	newBlock := block.New(txs, lastHash, difficulty)
-	newBlock.Mine()
+func addBlockToDb(tx *bbolt.Tx, bc *Blockchain, newBlock *block.Block) error {
+	b := tx.Bucket([]byte(blocksBucket))
+	b.Put(newBlock.Hash, newBlock.Serialize())
+	b.Put([]byte("l"), newBlock.Hash)
+	bc.tip = newBlock.Hash
 
-	err = bc.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(blocksBucket))
-		b.Put(newBlock.Hash, newBlock.Serialize())
-		b.Put([]byte("l"), newBlock.Hash)
-		bc.tip = newBlock.Hash
-
-		utxoBucket := tx.Bucket([]byte(utxoBucket))
-		for _, tx := range newBlock.Transactions {
-			txID := tx.ID
-			for outIdx, output := range tx.Outputs {
-				key := fmt.Sprintf("%x_%d", txID, outIdx)
-				utxo := &utxo.UTXO{
-					TxID:   txID,
-					Index:  outIdx,
-					Output: output,
-				}
-				utxoBucket.Put([]byte(key), utxo.Serialize())
+	utxoBucket := tx.Bucket([]byte(utxoBucket))
+	for _, tx := range newBlock.Transactions {
+		txID := tx.ID
+		for outIdx, output := range tx.Outputs {
+			key := fmt.Sprintf("%x_%d", txID, outIdx)
+			utxo := &utxo.UTXO{
+				TxID:   txID,
+				Index:  outIdx,
+				Output: output,
 			}
+			utxoBucket.Put([]byte(key), utxo.Serialize())
 		}
-		return nil
-	})
-
-	if err != nil {
-		log.Panic("Failed to persist block:", err)
 	}
+	return nil
 }
 
-func (bc *Blockchain) GetUTXOs(address string) []*utxo.UTXO {
-	var utxos []*utxo.UTXO
-	err := bc.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(utxoBucket))
-		c := b.Cursor()
-		prefix := []byte(address + "_")
+func getUTXOs(tx *bbolt.Tx, address string, utxos *[]*utxo.UTXO) error {
+	b := tx.Bucket([]byte(utxoBucket))
+	c := b.Cursor()
+	prefix := []byte(address + "_")
 
-		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			utxos = append(utxos, utxo.Deserialize(v))
-		}
-		return nil
-	})
-
-	if err != nil {
-		log.Panic(err)
+	for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+		*utxos = append(*utxos, utxo.Deserialize(v))
 	}
-	return utxos
+	return nil
 }
 
-func (bc *Blockchain) VerifyTransaction(tx *transaction.Transaction) bool {
-	if tx.IsCoinBase() {
-		return true
-	}
-
-	inputSum := 0
+func verifyInputTx(tx *transaction.Transaction, bc *Blockchain, inputSum *int) bool {
 	for _, in := range tx.Inputs {
 		utxos := bc.GetUTXOs(hex.EncodeToString(in.PubKey))
 		found := false
 		for _, utxo := range utxos {
 			if bytes.Equal(utxo.TxID, in.TxID) && utxo.Index == in.OutIndex {
-				inputSum += utxo.Output.Value // Verifica firma
+				*inputSum += utxo.Output.Value // Verifica firma
 				data := fmt.Sprintf("%x:%d", in.TxID, in.OutIndex)
 				hash := sha256.Sum256([]byte(data))
 				r := new(big.Int).SetBytes(in.Signature[:len(in.Signature)/2])
@@ -109,19 +95,11 @@ func (bc *Blockchain) VerifyTransaction(tx *transaction.Transaction) bool {
 			return false
 		}
 	}
-	outputSum := 0
-	for _, out := range tx.Outputs {
-		outputSum += out.Value
-	}
-
-	return inputSum >= outputSum
+	return true
 }
 
-func (bc *Blockchain) GetBalance(address string) int {
-	utxos := bc.GetUTXOs(address)
-	balance := 0
-	for _, utxo := range utxos {
-		balance += utxo.Output.Value
+func verifyOutputTx(tx *transaction.Transaction, outputSum *int) {
+	for _, out := range tx.Outputs {
+		*outputSum += out.Value
 	}
-	return balance
 }

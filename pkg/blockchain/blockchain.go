@@ -4,6 +4,8 @@ import (
 	"log"
 
 	"github.com/taekwondodev/crypto-simulator/pkg/block"
+	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
+	"github.com/taekwondodev/crypto-simulator/pkg/utxo"
 	"go.etcd.io/bbolt"
 )
 
@@ -26,17 +28,7 @@ func New() *Blockchain {
 
 	var tip []byte
 	err = db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(blocksBucket))
-		if b == nil {
-			genesis := block.New(nil, []byte("0"), 0)
-			b, _ := tx.CreateBucket([]byte(blocksBucket))
-			b.Put(genesis.Hash, genesis.Serialize())
-			b.Put([]byte("l"), genesis.Hash)
-			tip = genesis.Hash
-		} else {
-			tip = b.Get([]byte("l"))
-		}
-		return nil
+		return createGenesisBlock(tx, &tip)
 	})
 
 	if err != nil {
@@ -48,4 +40,63 @@ func New() *Blockchain {
 
 func (bc *Blockchain) Close() {
 	bc.db.Close()
+}
+
+func (bc *Blockchain) AddBlock(txs []*transaction.Transaction, difficulty int) {
+	var lastHash []byte
+
+	err := bc.db.View(func(tx *bbolt.Tx) error {
+		return getLastHash(tx, &lastHash)
+	})
+	if err != nil {
+		log.Panic("Failed to get last hash:", err)
+	}
+
+	newBlock := block.New(txs, lastHash, difficulty)
+	newBlock.Mine()
+
+	err = bc.db.Update(func(tx *bbolt.Tx) error {
+		return addBlockToDb(tx, bc, newBlock)
+	})
+
+	if err != nil {
+		log.Panic("Failed to persist block:", err)
+	}
+}
+
+func (bc *Blockchain) GetUTXOs(address string) []*utxo.UTXO {
+	var utxos []*utxo.UTXO
+	err := bc.db.View(func(tx *bbolt.Tx) error {
+		return getUTXOs(tx, address, &utxos)
+	})
+
+	if err != nil {
+		log.Panic(err)
+	}
+	return utxos
+}
+
+func (bc *Blockchain) VerifyTransaction(tx *transaction.Transaction) bool {
+	if tx.IsCoinBase() {
+		return true
+	}
+
+	inputSum := 0
+	if !verifyInputTx(tx, bc, &inputSum) {
+		return false
+	}
+
+	outputSum := 0
+	verifyOutputTx(tx, &outputSum)
+
+	return inputSum >= outputSum
+}
+
+func (bc *Blockchain) GetBalance(address string) int {
+	utxos := bc.GetUTXOs(address)
+	balance := 0
+	for _, utxo := range utxos {
+		balance += utxo.Output.Value
+	}
+	return balance
 }

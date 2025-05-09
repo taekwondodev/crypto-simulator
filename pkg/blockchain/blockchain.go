@@ -2,6 +2,8 @@ package blockchain
 
 import (
 	"log"
+	"math"
+	"time"
 
 	"github.com/taekwondodev/crypto-simulator/pkg/block"
 	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
@@ -10,9 +12,11 @@ import (
 )
 
 const (
-	dbFile       = "blockchain.db"
-	utxoBucket   = "utxo"
-	blocksBucket = "blocks"
+	dbFile          = "blockchain.db"
+	utxoBucket      = "utxo"
+	blocksBucket    = "blocks"
+	blocksToAdjust  = 10
+	targetBlockTime = 2 * time.Minute
 )
 
 type Blockchain struct {
@@ -42,7 +46,7 @@ func (bc *Blockchain) Close() {
 	bc.db.Close()
 }
 
-func (bc *Blockchain) AddBlock(txs []*transaction.Transaction, difficulty int) {
+func (bc *Blockchain) AddBlock(txs []*transaction.Transaction, difficulty int) *block.Block {
 	var lastHash []byte
 
 	err := bc.db.View(func(tx *bbolt.Tx) error {
@@ -62,6 +66,8 @@ func (bc *Blockchain) AddBlock(txs []*transaction.Transaction, difficulty int) {
 	if err != nil {
 		log.Panic("Failed to persist block:", err)
 	}
+
+	return newBlock
 }
 
 func (bc *Blockchain) GetUTXOs(address string) []*utxo.UTXO {
@@ -99,4 +105,25 @@ func (bc *Blockchain) GetBalance(address string) int {
 		balance += utxo.Output.Value
 	}
 	return balance
+}
+
+func (bc *Blockchain) adjustDifficulty() int {
+	blocks := bc.getLastBlocks(blocksToAdjust)
+	if len(blocks) < 2 {
+		return bc.CurrentDifficulty()
+	}
+
+	first := blocks[0]
+	last := blocks[len(blocks)-1]
+	timeDiff := last.Timestamp.Sub(first.Timestamp).Minutes()
+
+	target := float64(blocksToAdjust) * targetBlockTime.Minutes()
+	ratio := target / timeDiff
+
+	newDiff := float64(bc.CurrentDifficulty()) * ratio
+	return int(math.Max(1, math.Round(newDiff)))
+}
+
+func (bc *Blockchain) getLastBlocks(n int) []*block.Block {
+	///
 }

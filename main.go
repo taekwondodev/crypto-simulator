@@ -1,54 +1,64 @@
 package main
 
 import (
-	"fmt"
-	"log"
+	"time"
 
 	"github.com/taekwondodev/crypto-simulator/pkg/blockchain"
+	"github.com/taekwondodev/crypto-simulator/pkg/mempool"
+	"github.com/taekwondodev/crypto-simulator/pkg/p2p"
 	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
-	"github.com/taekwondodev/crypto-simulator/pkg/utxo"
 	"github.com/taekwondodev/crypto-simulator/pkg/wallet"
 )
 
 func main() {
+	node := p2p.NewNode(":3000")
+	go node.Start()
+
 	bc := blockchain.New()
 	defer bc.Close()
+	mp := mempool.New()
 
-	difficulty := 2
+	node.Connect(":3001")
 
-	// Miner -> Alice
-	minerWallet := wallet.NewWallet()
-	minerAddress := minerWallet.GetAddress()
-	aliceWallet := wallet.NewWallet()
-	aliceAddress := aliceWallet.GetAddress()
+	go minerRoutine(node, bc, mp)
 
-	coinbaseTx := transaction.NewCoinBaseTx(minerAddress, 100)
-	bc.AddBlock([]*transaction.Transaction{coinbaseTx}, difficulty)
+	go transactionGenerator(node, mp)
 
-	utxos := bc.GetUTXOs(minerAddress)
-	if len(utxos) == 0 {
-		log.Panic("Nessun UTXO disponibile per il miner!")
+	select {}
+}
+
+func minerRoutine(node *p2p.Node, bc *blockchain.Blockchain, mp *mempool.Mempool) {
+	for {
+		// Prendi transazioni dalla mempool
+		txs := mp.Flush()
+		if len(txs) == 0 {
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		// Calcola difficoltà
+		difficulty := bc.CurrentDifficulty()
+
+		// Aggiungi alla blockchain
+		newBlock := bc.AddBlock(txs, difficulty)
+
+		// Diffondi il blocco alla rete
+		blockData := newBlock.Serialize()
+		node.Broadcast(append([]byte{byte(p2p.MsgBlock)}, blockData...))
 	}
+}
 
-	input := utxo.TxInput{
-		TxID:     utxos[0].TxID,
-		OutIndex: utxos[0].Index,
-		PubKey:   minerWallet.Address,
+func transactionGenerator(node *p2p.Node, mp *mempool.Mempool) {
+	for {
+		// Crea transazione fittizia
+		wallet := wallet.NewWallet()
+		tx := transaction.NewCoinBaseTx(wallet.GetAddress(), 10)
+		mp.Add(tx)
+
+		// Diffondi alla rete
+		txData := tx.Serialize()
+		node.Broadcast(append([]byte{byte(p2p.MsgTx)}, txData...))
+
+		time.Sleep(30 * time.Second)
 	}
-	input.Sign(minerWallet.PrivateKey)
-
-	outputs := []utxo.TxOutput{
-		{Value: 70, PubKeyHash: []byte(aliceAddress)},
-		{Value: 30, PubKeyHash: []byte(minerAddress)},
-	}
-
-	tx := transaction.New([]utxo.TxInput{input}, outputs)
-	if !bc.VerifyTransaction(tx) {
-		log.Panic("Transazione non valida!")
-	}
-
-	bc.AddBlock([]*transaction.Transaction{tx}, difficulty)
-
-	fmt.Printf("Saldo Miner: %d\n", bc.GetBalance(minerAddress))
-	fmt.Printf("Saldo Alice: %d\n", bc.GetBalance(aliceAddress))
 }

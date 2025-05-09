@@ -21,18 +21,18 @@ const (
 
 type Blockchain struct {
 	tip       []byte
-	db        *bbolt.DB
+	Db        *bbolt.DB
 	utxoCache *lru.Cache[string, []*utxo.UTXO]
 }
 
 func New() *Blockchain {
-	db, err := bbolt.Open(dbFile, 0600, nil)
+	Db, err := bbolt.Open(dbFile, 0600, nil)
 	if err != nil {
 		log.Panic(err)
 	}
 
 	var tip []byte
-	err = db.Update(func(tx *bbolt.Tx) error {
+	err = Db.Update(func(tx *bbolt.Tx) error {
 		return createGenesisBlock(tx, &tip)
 	})
 
@@ -41,15 +41,15 @@ func New() *Blockchain {
 	}
 
 	cache, _ := lru.New[string, []*utxo.UTXO](10000)
-	return &Blockchain{tip, db, cache}
+	return &Blockchain{tip, Db, cache}
 }
 
 func (bc *Blockchain) Close() {
-	bc.db.Close()
+	bc.Db.Close()
 }
 
 func (bc *Blockchain) InitHeightIndex() error {
-	return bc.db.Update(func(tx *bbolt.Tx) error {
+	return bc.Db.Update(func(tx *bbolt.Tx) error {
 		// Create height index bucket if it doesn't exist
 		_, err := tx.CreateBucketIfNotExists([]byte(heightIndex))
 		if err != nil {
@@ -85,7 +85,7 @@ func (bc *Blockchain) AddBlock(txs []*transaction.Transaction) *block.Block {
 	newBlock := block.New(height+1, txs, bc.tip, difficulty)
 	newBlock.Mine()
 
-	err := bc.db.Update(func(tx *bbolt.Tx) error {
+	err := bc.Db.Update(func(tx *bbolt.Tx) error {
 		return addBlockToDb(tx, bc, newBlock)
 	})
 
@@ -102,7 +102,7 @@ func (bc *Blockchain) GetUTXOs(address string) []*utxo.UTXO {
 	}
 
 	var utxos []*utxo.UTXO
-	err := bc.db.View(func(tx *bbolt.Tx) error {
+	err := bc.Db.View(func(tx *bbolt.Tx) error {
 		return getUTXOs(tx, address, &utxos)
 	})
 
@@ -141,7 +141,7 @@ func (bc *Blockchain) GetBalance(address string) int {
 
 func (bc *Blockchain) CurrentDifficulty() int {
 	var lastBlock *block.Block
-	err := bc.db.View(func(tx *bbolt.Tx) error {
+	err := bc.Db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 		lastBlock = block.Deserialize(b.Get(bc.tip))
 		return nil
@@ -155,7 +155,7 @@ func (bc *Blockchain) CurrentDifficulty() int {
 func (bc *Blockchain) GetBlock(hash []byte) *block.Block {
 	var blockData []byte
 
-	bc.db.View(func(tx *bbolt.Tx) error {
+	bc.Db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 		blockData = b.Get(hash)
 		return nil

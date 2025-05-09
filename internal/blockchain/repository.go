@@ -201,7 +201,7 @@ func (bc *Blockchain) LastBlock() *block.Block {
 func (bc *Blockchain) GetBlockAtHeight(height int) *block.Block {
 	var blockData []byte
 
-	bc.db.View(func(tx *bbolt.Tx) error {
+	bc.Db.View(func(tx *bbolt.Tx) error {
 		heightBucket := tx.Bucket([]byte(heightIndex))
 		blockBucket := tx.Bucket([]byte(blocksBucket))
 

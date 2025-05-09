@@ -335,7 +335,18 @@ func (n *Node) Connect(addr string) {
 	go n.handleConnection(conn)
 }
 
-// non c'è
+// GetPeers returns a copy of the peer list for CLI display
+func (n *Node) GetPeers() []Peer {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	peers := make([]Peer, 0, len(n.Peers))
+	for _, p := range n.Peers {
+		peers = append(peers, *p) // Copy peers
+	}
+	return peers
+}
+
 func (n *Node) sendPing(conn net.Conn) error {
 	pingMsg := &Message{
 		Version:   0x01,

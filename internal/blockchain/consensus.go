@@ -21,7 +21,7 @@ func (bc *Blockchain) IsValidChain(newChain []*block.Block) bool {
 }
 
 func (bc *Blockchain) ReorganizeChain(newChain []*block.Block) error {
-	return bc.db.Update(func(tx *bbolt.Tx) error {
+	return bc.Db.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(blocksBucket))
 		utxoBucket := tx.Bucket([]byte(utxoBucket))
 
@@ -114,7 +114,7 @@ func (bc *Blockchain) ReorganizeChain(newChain []*block.Block) error {
 func (bc *Blockchain) FindTransaction(id []byte) *transaction.Transaction {
 	var t *transaction.Transaction
 
-	bc.db.View(func(tx *bbolt.Tx) error {
+	bc.Db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(blocksBucket))
 		cursor := bucket.Cursor()
 
@@ -143,7 +143,7 @@ func (bc *Blockchain) getChainFrom(startHash []byte) []*block.Block {
 	var chain []*block.Block
 	currentHash := startHash
 
-	bc.db.View(func(tx *bbolt.Tx) error {
+	bc.Db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 		for currentHash != nil {
 			blk := block.Deserialize(b.Get(currentHash))

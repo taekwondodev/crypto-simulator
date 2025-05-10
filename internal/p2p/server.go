@@ -3,89 +3,71 @@ package p2p
 import (
 	"bytes"
 	"encoding/gob"
+	"encoding/hex"
+	"errors"
 	"log"
 	"net"
-	"time"
 
 	"github.com/taekwondodev/crypto-simulator/pkg/block"
 	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
 )
 
-func (n *Node) handleVersion(msg *Message, conn net.Conn) error {
-	// Extract peer address from version message if present
+func (n *Node) handleMessage(msg *Message, conn net.Conn) error {
+	handlers := map[uint8]func(*Message, net.Conn) error{
+		MsgVersion:   func(m *Message, c net.Conn) error { return n.handleVersion(m) },
+		MsgVerAck:    func(m *Message, c net.Conn) error { return n.handleVerAck() },
+		MsgPing:      func(m *Message, c net.Conn) error { return n.handlePing(c) },
+		MsgPong:      func(m *Message, c net.Conn) error { return n.handlePong() },
+		MsgTx:        func(m *Message, c net.Conn) error { return n.handleTransaction(m) },
+		MsgBlock:     func(m *Message, c net.Conn) error { return n.handleBlock(m) },
+		MsgGetBlocks: func(m *Message, c net.Conn) error { return n.handleGetBlocks(m, c) },
+		MsgInv:       func(m *Message, c net.Conn) error { return n.handleInventory(m, c) },
+		MsgGetData:   func(m *Message, c net.Conn) error { return n.handleGetData(m, c) },
+		MsgAddr:      func(m *Message, c net.Conn) error { return n.handleAddress(m) },
+		MsgGetAddr:   func(m *Message, c net.Conn) error { return n.handleGetAddr(c) },
+	}
+
+	handler, exists := handlers[msg.Type]
+	if !exists {
+		return errors.New("unknown message type")
+	}
+
+	return handler(msg, conn)
+}
+
+func (n *Node) handleVersion(msg *Message) error {
 	peerAddr := string(msg.Payload)
 	if peerAddr != "" {
-		log.Printf("Received version message from %s", peerAddr)
+		logMessageReceived(msg.Type, peerAddr)
 	}
 
 	// We've already responded with verack in the handshake
 	return nil
 }
 
-func (n *Node) handleVerAck(msg *Message) error {
+func (n *Node) handleVerAck() error {
 	// Handshake complete, nothing to do
 	return nil
 }
 
-func (n *Node) handlePing(msg *Message, conn net.Conn) error {
-	// Send pong in response to ping
-	pongMsg := &Message{
-		Version:   0x01,
-		Type:      MsgPong,
-		Timestamp: time.Now().Unix(),
-	}
-
-	data, err := pongMsg.Serialize()
-	if err != nil {
-		return err
-	}
-
-	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	_, err = conn.Write(data)
-	return err
+func (n *Node) handlePing(conn net.Conn) error {
+	return sendPongMessage(conn)
 }
 
-func (n *Node) handlePong(msg *Message) error {
+func (n *Node) handlePong() error {
 	// Ping/pong is just for keepalive, nothing to do
 	return nil
 }
 
 func (n *Node) handleBlock(msg *Message) error {
-	// Deserialize the block
 	newBlock := block.Deserialize(msg.Payload)
 
-	// Get current blockchain tip
 	lastBlock := n.blockchain.LastBlock()
 
-	// Scenario 1: This block extends our current chain
-	if bytes.Equal(newBlock.PreviousHash, lastBlock.Hash) {
-		if newBlock.Validate(lastBlock) {
-			n.blockchain.AddBlock([]*transaction.Transaction{}) // This isn't right but we need to fix elsewhere
-			log.Printf("Added new block: %x at height %d", newBlock.Hash, newBlock.Height)
-		} else {
-			log.Printf("Received invalid block: %x", newBlock.Hash)
-		}
-		return nil
-	}
-	// Scenario 2: This could be a fork, check if it's longer
-	currentHeight := n.blockchain.CurrentHeight()
-	if newBlock.Height > currentHeight {
-		// Fetch the full candidate chain
-		candidateChain, err := n.fetchCandidateChain(newBlock)
-		if err != nil {
-			log.Printf("Error fetching candidate chain: %v", err)
-			return err
-		}
-
-		if n.blockchain.IsValidChain(candidateChain) {
-			err := n.blockchain.ReorganizeChain(candidateChain)
-			if err != nil {
-				log.Printf("Chain reorganization failed: %v", err)
-				return err
-			}
-			log.Printf("Chain reorganized to new tip: %x at height %d",
-				candidateChain[len(candidateChain)-1].Hash, candidateChain[len(candidateChain)-1].Height)
-		}
+	if shouldAddBlock(newBlock, lastBlock) {
+		return n.processNewBlock(newBlock, lastBlock)
+	} else if isPotentialFork(newBlock, n.blockchain.CurrentHeight()) {
+		return n.handlePotentialFork(newBlock)
 	}
 
 	return nil
@@ -96,14 +78,13 @@ func (n *Node) handleTransaction(msg *Message) error {
 
 	if n.mempool.ValidateTransaction(tx) {
 		n.mempool.Add(tx)
-		n.Broadcast(msg) // Inoltra ad altri peer
+		n.Broadcast(msg)
 	}
 
 	return nil
 }
 
 func (n *Node) handleGetBlocks(msg *Message, conn net.Conn) error {
-	// 1. Ottieni l'ultimo hash conosciuto dal peer
 	var lastKnownHash []byte
 	if len(msg.Payload) > 0 {
 		lastKnownHash = msg.Payload
@@ -111,100 +92,40 @@ func (n *Node) handleGetBlocks(msg *Message, conn net.Conn) error {
 
 	// Get block locator (list of hashes to help peer sync)
 	locator := n.blockchain.GetBlockLocator(lastKnownHash)
-
-	// Send inventory message with block hashes
-	invMsg := &Message{
-		Version:   0x01,
-		Type:      MsgInv,
-		Timestamp: time.Now().Unix(),
-		Payload:   serializeHashes(locator),
-	}
-
-	data, err := invMsg.Serialize()
-	if err != nil {
-		return err
-	}
-	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	_, err = conn.Write(data)
-	return err
+	return sendInvMessage(conn, locator)
 }
 
 func (n *Node) handleInventory(msg *Message, conn net.Conn) error {
-	// Deserialize list of hashes
 	hashes, err := deserializeHashes(msg.Payload)
 	if err != nil {
 		return err
 	}
 
-	// For each hash that we don't have, request the data
-	var unknownHashes [][]byte
-
-	for _, hash := range hashes {
-		if n.blockchain.GetBlock(hash) == nil {
-			unknownHashes = append(unknownHashes, hash)
-		}
-	}
-
+	unknownHashes := n.collectUnknownBlockHashes(hashes)
 	if len(unknownHashes) > 0 {
-		// Request unknown blocks
-		getDataMsg := &Message{
-			Version:   0x01,
-			Type:      MsgGetData,
-			Timestamp: time.Now().Unix(),
-			Payload:   serializeHashes(unknownHashes),
-		}
-
-		data, err := getDataMsg.Serialize()
-		if err != nil {
-			return err
-		}
-
-		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		_, err = conn.Write(data)
-		if err != nil {
-			return err
-		}
+		return sendGetDataMessage(conn, unknownHashes)
 	}
 
 	return nil
 }
 
 func (n *Node) handleGetData(msg *Message, conn net.Conn) error {
-	// Deserialize list of requested hashes
 	hashes, err := deserializeHashes(msg.Payload)
 	if err != nil {
 		return err
 	}
 
-	// Send each requested block or transaction
 	for _, hash := range hashes {
-		// Check if it's a block hash
-		block := n.blockchain.GetBlock(hash)
-		if block != nil {
-			blockMsg := &Message{
-				Version:   0x01,
-				Type:      MsgBlock,
-				Timestamp: time.Now().Unix(),
-				Payload:   block.Serialize(),
-			}
-
-			data, err := blockMsg.Serialize()
-			if err != nil {
-				continue
-			}
-
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			conn.Write(data)
-			continue
+		if err := n.sendRequestedData(hash, conn); err != nil {
+			log.Printf("Error sending requested data for hash %x: %v", hash, err)
+			// Continue with other hashes even if one fails
 		}
-
-		// Could implement transaction lookup here too if needed
 	}
+
 	return nil
 }
 
 func (n *Node) handleAddress(msg *Message) error {
-	// Add addresses to our peer list
 	var addresses []string
 	decoder := gob.NewDecoder(bytes.NewReader(msg.Payload))
 	if err := decoder.Decode(&addresses); err != nil {
@@ -220,50 +141,111 @@ func (n *Node) handleAddress(msg *Message) error {
 	return nil
 }
 
-func (n *Node) handleGetAddr(msg *Message, conn net.Conn) error {
-	// Send list of known peer addresses
+func (n *Node) handleGetAddr(conn net.Conn) error {
+	addresses := n.collectPeerAddresses()
+	buffer := serializeAddresses(addresses)
+	return sendAddrMessage(conn, buffer)
+}
+
+/*********************************************************************************************/
+
+func shouldAddBlock(newBlock, lastBlock *block.Block) bool {
+	return bytes.Equal(newBlock.PreviousHash, lastBlock.Hash)
+}
+
+func isPotentialFork(newBlock *block.Block, currentHeight int) bool {
+	return newBlock.Height > currentHeight
+}
+
+func (n *Node) processNewBlock(newBlock, lastBlock *block.Block) error {
+	if newBlock.Validate(lastBlock) {
+		n.blockchain.AddBlock(newBlock.Transactions)
+		log.Printf("Added new block: %x at height %d", newBlock.Hash, newBlock.Height)
+	} else {
+		log.Printf("Received invalid block: %x", newBlock.Hash)
+	}
+	return nil
+}
+
+func (n *Node) handlePotentialFork(newBlock *block.Block) error {
+	candidateChain, err := n.fetchCandidateChain(newBlock)
+	if err != nil {
+		log.Printf("Error fetching candidate chain: %v", err)
+		return err
+	}
+
+	if n.blockchain.IsValidChain(candidateChain) {
+		if err := n.blockchain.ReorganizeChain(candidateChain); err != nil {
+			log.Printf("Chain reorganization failed: %v", err)
+			return err
+		}
+
+		tipBlock := candidateChain[len(candidateChain)-1]
+		log.Printf("Chain reorganized to new tip: %x at height %d",
+			tipBlock.Hash, tipBlock.Height)
+	}
+
+	return nil
+}
+
+func (n *Node) collectUnknownBlockHashes(hashes [][]byte) [][]byte {
+	var unknownHashes [][]byte
+
+	for _, hash := range hashes {
+		if n.blockchain.GetBlock(hash) == nil {
+			unknownHashes = append(unknownHashes, hash)
+		}
+	}
+
+	return unknownHashes
+}
+
+func (n *Node) sendRequestedData(hash []byte, conn net.Conn) error {
+	// Check if it's a block hash
+	blk := n.blockchain.GetBlock(hash)
+	if blk != nil {
+		return sendBlockMessage(conn, blk.Serialize())
+	}
+
+	txID := hex.EncodeToString(hash)
+	tx := n.mempool.Get(txID)
+	if tx != nil {
+		log.Printf("Sending requested transaction from mempool: %s", txID)
+		return sendTxMessage(conn, tx.Serialize())
+	}
+
+	// If not in mempool, check if it's a transaction in the blockchain
+	tx = n.blockchain.FindTransaction(hash)
+	if tx != nil {
+		log.Printf("Sending requested transaction from blockchain: %s", txID)
+		return sendTxMessage(conn, tx.Serialize())
+	}
+
+	log.Printf("Requested data not found for hash: %x", hash)
+	return nil
+}
+
+func (n *Node) collectPeerAddresses() []string {
 	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	addresses := make([]string, 0, len(n.Peers))
 	for addr := range n.Peers {
 		addresses = append(addresses, addr)
 	}
-	n.mu.Unlock()
 
-	// Serialize the addresses
+	return addresses
+}
+
+func serializeAddresses(addresses []string) []byte {
 	var buffer bytes.Buffer
 	encoder := gob.NewEncoder(&buffer)
-	if err := encoder.Encode(addresses); err != nil {
-		return err
-	}
-
-	// Create and send address message
-	addrMsg := &Message{
-		Version:   0x01,
-		Type:      MsgAddr,
-		Timestamp: time.Now().Unix(),
-		Payload:   buffer.Bytes(),
-	}
-
-	data, err := addrMsg.Serialize()
-	if err != nil {
-		return err
-	}
-
-	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	_, err = conn.Write(data)
-	return err
+	encoder.Encode(addresses)
+	return buffer.Bytes()
 }
 
 func (n *Node) fetchCandidateChain(startBlock *block.Block) ([]*block.Block, error) {
-	// Create a message to request blocks
-	getBlocksMsg := &Message{
-		Version:   0x01,
-		Type:      MsgGetBlocks,
-		Timestamp: time.Now().Unix(),
-		Payload:   startBlock.Hash,
-	}
-
-	// Broadcast the request
+	getBlocksMsg := NewGetBlocksMessage(startBlock.Hash)
 	n.Broadcast(getBlocksMsg)
 
 	// In a real implementation, this would wait for responses and build the chain

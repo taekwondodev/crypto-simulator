@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"sync"
@@ -76,51 +77,101 @@ func (n *Node) Start() {
 
 	log.Printf("Node listening on %s", n.Address)
 
-	// Start a goroutine to save peer list periodically
-	go func() {
-		ticker := time.NewTicker(15 * time.Minute)
-		defer ticker.Stop()
+	go n.runPeerSaver()
+	go n.acceptConnections(listener)
 
-		for {
-			select {
-			case <-ticker.C:
-				n.SavePeers()
-			case <-n.done:
-				return
-			}
-		}
-	}()
-
-	// rate limit connections
-	sem := make(chan struct{}, maxConnections)
-
-	// Accept connections until we're shutting down
-	go func() {
-		for {
-			sem <- struct{}{}
-
-			conn, err := listener.Accept()
-			if err != nil {
-				log.Printf("Accept error: %v", err)
-				<-sem
-				continue
-			}
-
-			go func() {
-				defer func() { <-sem }()
-				n.handleConnection(conn)
-			}()
-		}
-	}()
-
-	// Wait for shutdown signal
 	<-n.done
 	n.SavePeers() // Final save before shutdown
 }
 
-// Stop gracefully shuts down the node
 func (n *Node) Stop() {
 	close(n.done)
+}
+
+func (n *Node) Broadcast(msg *Message) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	for addr, peer := range n.Peers {
+		if err := writeMessage(peer.Connection, msg); err != nil {
+			logError(fmt.Sprintf("Failed to broadcast to %s", addr), err)
+			n.removePeerLocked(addr)
+		} else {
+			logMessageSent(msg.Type, addr)
+		}
+	}
+}
+
+func (n *Node) Connect(addr string) {
+	// Don't connect if already connected
+	n.mu.Lock()
+	if _, exists := n.Peers[addr]; exists {
+		n.mu.Unlock()
+		return
+	}
+	n.mu.Unlock()
+
+	conn, err := net.DialTimeout("tcp", addr, connectTimeout)
+	if err != nil {
+		log.Printf("Connection to %s failed: %v", addr, err)
+		return
+	}
+
+	go n.handleConnection(conn)
+}
+
+func (n *Node) GetPeers() []Peer {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	peers := make([]Peer, 0, len(n.Peers))
+	for _, p := range n.Peers {
+		peers = append(peers, *p)
+	}
+	return peers
+}
+
+/*********************************************************************************************/
+
+func (n *Node) runPeerSaver() {
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			n.SavePeers()
+		case <-n.done:
+			return
+		}
+	}
+}
+
+func (n *Node) acceptConnections(listener net.Listener) {
+	sem := make(chan struct{}, maxConnections)
+
+	for {
+		sem <- struct{}{}
+
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Printf("Accept error: %v", err)
+			<-sem
+
+			select {
+			case <-n.done:
+				return
+			default:
+				// Continue accepting if not shutting down
+			}
+			continue
+		}
+
+		go func() {
+			defer func() { <-sem }()
+			n.handleConnection(conn)
+		}()
+	}
 }
 
 func (n *Node) handleConnection(conn net.Conn) {
@@ -128,20 +179,35 @@ func (n *Node) handleConnection(conn net.Conn) {
 
 	conn.SetReadDeadline(time.Now().Add(readTimeout))
 
-	// Aggiungi timer per ping
-	pingTicker := time.NewTicker(pingInterval)
-	defer pingTicker.Stop()
+	peerAddr := conn.RemoteAddr().String()
 
-	// Run pinger in background
+	pingDone := n.setupPingKeepAlive(conn)
+	defer close(pingDone)
+
+	if err := n.performHandshake(conn); err != nil {
+		log.Printf("Handshake failed: %v", err)
+		return
+	}
+
+	n.registerPeer(conn, peerAddr)
+
+	n.processMessages(conn, peerAddr)
+
+	n.removePeer(peerAddr)
+}
+
+func (n *Node) setupPingKeepAlive(conn net.Conn) chan struct{} {
 	done := make(chan struct{})
-	defer close(done)
+	pingTicker := time.NewTicker(pingInterval)
 
 	go func() {
+		defer pingTicker.Stop()
+
 		for {
 			select {
 			case <-pingTicker.C:
-				if err := n.sendPing(conn); err != nil {
-					log.Printf("Error sending ping: %v", err)
+				if err := sendPingMessage(conn); err != nil {
+					log.Printf("Ping failed: %v", err)
 					return
 				}
 			case <-done:
@@ -150,157 +216,62 @@ func (n *Node) handleConnection(conn net.Conn) {
 		}
 	}()
 
-	// 1. Handshake
-	if err := n.performHandshake(conn); err != nil {
-		log.Printf("Handshake failed: %v", err)
-		return
-	}
+	return done
+}
 
-	// 2. Add the peer to our peer list
-	peerAddr := conn.RemoteAddr().String()
+func (n *Node) registerPeer(conn net.Conn, addr string) {
 	n.mu.Lock()
-	n.Peers[peerAddr] = &Peer{
-		Address:    peerAddr,
+	defer n.mu.Unlock()
+
+	n.Peers[addr] = &Peer{
+		Address:    addr,
 		Connection: conn,
 		LastSeen:   time.Now(),
 	}
-	n.mu.Unlock()
-	// 3. Gestione messaggi in loop
-	buf := make([]byte, 4096)
+
+	log.Printf("Peer registered: %s", addr)
+}
+
+func (n *Node) performHandshake(conn net.Conn) error {
+	if err := sendVersionMessage(conn, n.Address); err != nil {
+		return err
+	}
+
+	msg, err := readMessage(conn, 10*time.Second)
+	if err != nil {
+		return err
+	}
+
+	if msg.Type != MsgVersion {
+		return errors.New("expected version message during handshake")
+	}
+
+	return sendVerAckMessage(conn)
+}
+
+func (n *Node) updatePeerLastSeen(addr string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if peer, ok := n.Peers[addr]; ok {
+		peer.LastSeen = time.Now()
+	}
+}
+
+func (n *Node) processMessages(conn net.Conn, peerAddr string) {
 	for {
-		nBytes, err := conn.Read(buf)
+		msg, err := readMessage(conn, readTimeout)
 		if err != nil {
 			log.Printf("Read error from %s: %v", peerAddr, err)
 			break
 		}
 
-		msg, err := DeserializeMessage(buf[:nBytes])
-		if err != nil {
-			log.Printf("Error deserializing message: %v", err)
-			continue
-		}
+		n.updatePeerLastSeen(peerAddr)
 
-		// Reset read deadline on successful message
-		conn.SetReadDeadline(time.Now().Add(readTimeout))
+		logMessageReceived(msg.Type, peerAddr)
 
-		// Update last seen time
-		n.mu.Lock()
-		if peer, ok := n.Peers[peerAddr]; ok {
-			peer.LastSeen = time.Now()
-		}
-		n.mu.Unlock()
-
-		// Process the message
 		if err := n.handleMessage(msg, conn); err != nil {
-			log.Printf("Error handling message: %v", err)
-			continue
-		}
-	}
-
-	// Clean up peer on disconnect
-	n.removePeer(peerAddr)
-}
-
-func (n *Node) performHandshake(conn net.Conn) error {
-	// Invia nostro messaggio di version
-	versionMsg := &Message{
-		Version:   0x01,
-		Type:      MsgVersion,
-		Timestamp: time.Now().Unix(),
-		Payload:   []byte(n.Address),
-	}
-	data, err := versionMsg.Serialize()
-	if err != nil {
-		return err
-	}
-
-	if _, err := conn.Write(data); err != nil {
-		return err
-	}
-
-	// Wait for their version message in response
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	buf := make([]byte, 4096)
-
-	nBytes, err := conn.Read(buf)
-	if err != nil {
-		return err
-	}
-
-	msg, err := DeserializeMessage(buf[:nBytes])
-	if err != nil {
-		return err
-	}
-
-	// Verify it's a version message
-	if msg.Type != MsgVersion {
-		return errors.New("expected version message during handshake")
-	}
-
-	// Send verack
-	verackMsg := &Message{
-		Version:   0x01,
-		Type:      MsgVerAck,
-		Timestamp: time.Now().Unix(),
-	}
-
-	data, err = verackMsg.Serialize()
-	if err != nil {
-		return err
-	}
-
-	if _, err := conn.Write(data); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (n *Node) handleMessage(msg *Message, conn net.Conn) error {
-	switch msg.Type {
-	case MsgVersion:
-		return n.handleVersion(msg, conn)
-	case MsgVerAck:
-		return n.handleVerAck(msg)
-	case MsgPing:
-		return n.handlePing(msg, conn)
-	case MsgPong:
-		return n.handlePong(msg)
-	case MsgTx:
-		return n.handleTransaction(msg)
-	case MsgBlock:
-		return n.handleBlock(msg)
-	case MsgGetBlocks:
-		return n.handleGetBlocks(msg, conn)
-	case MsgInv:
-		return n.handleInventory(msg, conn)
-	case MsgGetData:
-		return n.handleGetData(msg, conn)
-	case MsgAddr:
-		return n.handleAddress(msg)
-	case MsgGetAddr:
-		return n.handleGetAddr(msg, conn)
-	default:
-		return errors.New("unknown message type")
-	}
-}
-
-func (n *Node) Broadcast(msg *Message) {
-	data, err := msg.Serialize()
-	if err != nil {
-		log.Printf("Error serializing message: %v", err)
-		return
-	}
-
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	for addr, peer := range n.Peers {
-		peer.Connection.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		_, err := peer.Connection.Write(data)
-		if err != nil {
-			log.Printf("Error sending to %s: %v", addr, err)
-			n.removePeer(addr)
+			log.Printf("Error handling message from %s: %v", peerAddr, err)
 		}
 	}
 }
@@ -315,51 +286,9 @@ func (n *Node) removePeer(addr string) {
 	}
 }
 
-func (n *Node) Connect(addr string) {
-	// Don't connect if already connected
-	n.mu.Lock()
-	if _, exists := n.Peers[addr]; exists {
-		n.mu.Unlock()
-		return
+func (n *Node) removePeerLocked(addr string) {
+	if peer, exists := n.Peers[addr]; exists {
+		peer.Connection.Close()
+		delete(n.Peers, addr)
 	}
-	n.mu.Unlock()
-
-	// Connect with timeout
-	conn, err := net.DialTimeout("tcp", addr, connectTimeout)
-	if err != nil {
-		log.Printf("Connection to %s failed: %v", addr, err)
-		return
-	}
-
-	// Handle new connection in a separate goroutine
-	go n.handleConnection(conn)
-}
-
-// GetPeers returns a copy of the peer list for CLI display
-func (n *Node) GetPeers() []Peer {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	peers := make([]Peer, 0, len(n.Peers))
-	for _, p := range n.Peers {
-		peers = append(peers, *p) // Copy peers
-	}
-	return peers
-}
-
-func (n *Node) sendPing(conn net.Conn) error {
-	pingMsg := &Message{
-		Version:   0x01,
-		Type:      MsgPing,
-		Timestamp: time.Now().Unix(),
-	}
-
-	data, err := pingMsg.Serialize()
-	if err != nil {
-		return err
-	}
-
-	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	_, err = conn.Write(data)
-	return err
 }

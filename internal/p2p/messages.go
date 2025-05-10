@@ -29,6 +29,39 @@ type Message struct {
 	Payload   []byte
 }
 
+func NewVersionMessage(senderAddr string) *Message {
+	return &Message{
+		Version:   0x01,
+		Type:      MsgVersion,
+		Timestamp: time.Now().Unix(),
+		Payload:   []byte(senderAddr),
+	}
+}
+
+func NewVerAckMessage() *Message {
+	return &Message{
+		Version:   0x01,
+		Type:      MsgVerAck,
+		Timestamp: time.Now().Unix(),
+	}
+}
+
+func NewPingMessage() *Message {
+	return &Message{
+		Version:   0x01,
+		Type:      MsgPing,
+		Timestamp: time.Now().Unix(),
+	}
+}
+
+func NewPongMessage() *Message {
+	return &Message{
+		Version:   0x01,
+		Type:      MsgPong,
+		Timestamp: time.Now().Unix(),
+	}
+}
+
 func NewTxMessage(txData []byte) *Message {
 	return &Message{
 		Version:   0x01,
@@ -56,39 +89,40 @@ func NewGetBlocksMessage(lastKnownHash []byte) *Message {
 	}
 }
 
-// Serialize converts a message to bytes
+func NewInvMessage(hashes [][]byte) *Message {
+	return &Message{
+		Version:   0x01,
+		Type:      MsgInv,
+		Timestamp: time.Now().Unix(),
+		Payload:   serializeHashes(hashes),
+	}
+}
+
+func NewGetDataMessage(hashes [][]byte) *Message {
+	return &Message{
+		Version:   0x01,
+		Type:      MsgGetData,
+		Timestamp: time.Now().Unix(),
+		Payload:   serializeHashes(hashes),
+	}
+}
+
+func NewAddrMessage(addresses []byte) *Message {
+	return &Message{
+		Version:   0x01,
+		Type:      MsgAddr,
+		Timestamp: time.Now().Unix(),
+		Payload:   addresses,
+	}
+}
+
 func (m *Message) Serialize() ([]byte, error) {
 	var buffer bytes.Buffer
-
-	// Write header fields
-	if err := binary.Write(&buffer, binary.LittleEndian, m.Version); err != nil {
-		return nil, err
-	}
-
-	if err := binary.Write(&buffer, binary.LittleEndian, m.Type); err != nil {
-		return nil, err
-	}
-
-	if err := binary.Write(&buffer, binary.LittleEndian, m.Timestamp); err != nil {
-		return nil, err
-	}
-
-	// Write payload length and payload
-	payloadLen := uint32(len(m.Payload))
-	if err := binary.Write(&buffer, binary.LittleEndian, payloadLen); err != nil {
-		return nil, err
-	}
-
-	if payloadLen > 0 {
-		if _, err := buffer.Write(m.Payload); err != nil {
-			return nil, err
-		}
-	}
-
+	writeHeader(buffer, m)
+	writePayload(buffer, m)
 	return buffer.Bytes(), nil
 }
 
-// DeserializeMessage converts bytes to a message
 func DeserializeMessage(data []byte) (*Message, error) {
 	if len(data) < 13 { // Minimum size: version(4) + type(1) + timestamp(8)
 		return nil, errors.New("message data too short")
@@ -97,36 +131,12 @@ func DeserializeMessage(data []byte) (*Message, error) {
 	buffer := bytes.NewReader(data)
 	var msg Message
 
-	if err := binary.Read(buffer, binary.LittleEndian, &msg.Version); err != nil {
-		return nil, err
-	}
-
-	if err := binary.Read(buffer, binary.LittleEndian, &msg.Type); err != nil {
-		return nil, err
-	}
-
-	if err := binary.Read(buffer, binary.LittleEndian, &msg.Timestamp); err != nil {
-		return nil, err
-	}
-
-	// Read payload length
-	var payloadLen uint32
-	if err := binary.Read(buffer, binary.LittleEndian, &payloadLen); err != nil {
-		return nil, err
-	}
-
-	// Read payload if exists
-	if payloadLen > 0 {
-		msg.Payload = make([]byte, payloadLen)
-		if _, err := buffer.Read(msg.Payload); err != nil {
-			return nil, err
-		}
-	}
+	readHeader(buffer, msg)
+	readPayload(buffer, &msg)
 
 	return &msg, nil
 }
 
-// SerializeHashes serializes a slice of hashes
 func serializeHashes(hashes [][]byte) []byte {
 	var buffer bytes.Buffer
 	encoder := gob.NewEncoder(&buffer)
@@ -140,7 +150,6 @@ func serializeHashes(hashes [][]byte) []byte {
 	return buffer.Bytes()
 }
 
-// DeserializeHashes deserializes a slice of hashes
 func deserializeHashes(data []byte) ([][]byte, error) {
 	buffer := bytes.NewReader(data)
 	decoder := gob.NewDecoder(buffer)
@@ -151,19 +160,82 @@ func deserializeHashes(data []byte) ([][]byte, error) {
 	}
 
 	hashes := make([][]byte, count)
-	for i := 0; i < count; i++ {
-		var hashLen int
-		if err := decoder.Decode(&hashLen); err != nil {
+	for i := range count {
+		if err := deserializeHash(decoder, &hashes, i); err != nil {
 			return nil, err
 		}
-
-		hash := make([]byte, hashLen)
-		if err := decoder.Decode(&hash); err != nil {
-			return nil, err
-		}
-
-		hashes[i] = hash
 	}
 
 	return hashes, nil
+}
+
+func writeHeader(buffer bytes.Buffer, m *Message) error {
+	if err := binary.Write(&buffer, binary.LittleEndian, m.Version); err != nil {
+		return err
+	}
+
+	if err := binary.Write(&buffer, binary.LittleEndian, m.Type); err != nil {
+		return err
+	}
+
+	return binary.Write(&buffer, binary.LittleEndian, m.Timestamp)
+}
+
+func readHeader(buffer *bytes.Reader, msg Message) error {
+	if err := binary.Read(buffer, binary.LittleEndian, &msg.Version); err != nil {
+		return err
+	}
+
+	if err := binary.Read(buffer, binary.LittleEndian, &msg.Type); err != nil {
+		return err
+	}
+
+	return binary.Read(buffer, binary.LittleEndian, &msg.Timestamp)
+}
+
+func writePayload(buffer bytes.Buffer, m *Message) error {
+	payloadLen := uint32(len(m.Payload))
+	if err := binary.Write(&buffer, binary.LittleEndian, payloadLen); err != nil {
+		return err
+	}
+
+	if payloadLen > 0 {
+		if _, err := buffer.Write(m.Payload); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func readPayload(buffer *bytes.Reader, msg *Message) error {
+	var payloadLen uint32
+	if err := binary.Read(buffer, binary.LittleEndian, &payloadLen); err != nil {
+		return err
+	}
+
+	// Read payload if exists
+	if payloadLen > 0 {
+		msg.Payload = make([]byte, payloadLen)
+		if _, err := buffer.Read(msg.Payload); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func deserializeHash(decoder *gob.Decoder, hashes *[][]byte, i int) error {
+	var hashLen int
+	if err := decoder.Decode(&hashLen); err != nil {
+		return err
+	}
+
+	hash := make([]byte, hashLen)
+	if err := decoder.Decode(&hash); err != nil {
+		return err
+	}
+
+	(*hashes)[i] = hash
+	return nil
 }

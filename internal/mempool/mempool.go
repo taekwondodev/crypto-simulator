@@ -90,7 +90,11 @@ func (m *Mempool) Get(txID string) *transaction.Transaction {
 	shard.mu.RLock()
 	defer shard.mu.RUnlock()
 
-	return shard.txs[txID]
+	tx, exists := shard.txs[txID]
+	if !exists {
+		return nil
+	}
+	return tx
 }
 
 func (m *Mempool) Count() int {

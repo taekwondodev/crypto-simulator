@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/gob"
+	"fmt"
 	"log"
 
 	"github.com/taekwondodev/crypto-simulator/pkg/utxo"
@@ -67,4 +68,16 @@ func Deserialize(data []byte) *Transaction {
 		log.Panic("Failed to deserialize transaction:", err)
 	}
 	return &tx
+}
+
+func (tx *Transaction) Print(indent string) {
+	fmt.Printf("%sTransaction: %x\n", indent, tx.ID)
+	fmt.Printf("%s  Inputs: %d\n", indent, len(tx.Inputs))
+	for i, input := range tx.Inputs {
+		fmt.Printf("%s  Input %d: %x:%d\n", indent, i, input.TxID, input.OutIndex)
+	}
+	fmt.Printf("%s  Outputs: %d\n", indent, len(tx.Outputs))
+	for i, output := range tx.Outputs {
+		fmt.Printf("%s    Output %d: %d coins\n", indent, i, output.Value)
+	}
 }

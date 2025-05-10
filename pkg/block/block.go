@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -118,4 +119,12 @@ func Deserialize(data []byte) *Block {
 		log.Panic("Failed to deserialize block:", err)
 	}
 	return &block
+}
+
+func (b *Block) Print() {
+	fmt.Printf("Block %d: %x\n", b.Height, b.Hash)
+	fmt.Printf("  Transactions: %d\n", len(b.Transactions))
+	fmt.Printf("  Timestamp: %s\n", b.Timestamp.Format(time.RFC3339))
+	fmt.Printf("  Difficulty: %d\n", b.Difficulty)
+	fmt.Println()
 }

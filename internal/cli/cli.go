@@ -1,26 +1,23 @@
 package cli
 
 import (
-	"bufio"
+	"encoding/hex"
 	"fmt"
 	"log"
-	"os"
-	"strconv"
 	"strings"
 
 	"github.com/taekwondodev/crypto-simulator/internal/blockchain"
 	"github.com/taekwondodev/crypto-simulator/internal/mempool"
 	"github.com/taekwondodev/crypto-simulator/internal/p2p"
-	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
-	"github.com/taekwondodev/crypto-simulator/pkg/utxo"
 	"github.com/taekwondodev/crypto-simulator/pkg/wallet"
 )
 
 type CLI struct {
-	bc      *blockchain.Blockchain
-	mp      *mempool.Mempool
-	node    *p2p.Node
-	wallets map[string]*wallet.Wallet
+	bc              *blockchain.Blockchain
+	mp              *mempool.Mempool
+	node            *p2p.Node
+	wallets         map[string]*Wallet
+	commandHandlers map[string]func([]string) error
 }
 
 func NewCLI(bc *blockchain.Blockchain, mp *mempool.Mempool, node *p2p.Node) *CLI {
@@ -28,7 +25,21 @@ func NewCLI(bc *blockchain.Blockchain, mp *mempool.Mempool, node *p2p.Node) *CLI
 		bc:      bc,
 		mp:      mp,
 		node:    node,
-		wallets: make(map[string]*wallet.Wallet),
+		wallets: make(map[string]*Wallet),
+	}
+
+	cli.commandHandlers = map[string]func([]string) error{
+		"help":         func(parts []string) error { return cli.printHelp() },
+		"createwallet": func(parts []string) error { return cli.createWallet() },
+		"listwallet":   func(parts []string) error { return cli.listWallets() },
+		"balance":      func(parts []string) error { return cli.handleBalance(parts) },
+		"send":         func(parts []string) error { return cli.handleSend(parts) },
+		"mine":         func(parts []string) error { return cli.mineBlock() },
+		"blockchain":   func(parts []string) error { return cli.printBlockchain() },
+		"mempool":      func(parts []string) error { return cli.showMempool() },
+		"peers":        func(parts []string) error { return cli.listPeers() },
+		"connect":      func(parts []string) error { return cli.handleConnect(parts) },
+		"tx":           func(parts []string) error { return cli.handleTransactionDetails(parts) },
 	}
 
 	if err := cli.LoadWallets(); err != nil {
@@ -38,70 +49,36 @@ func NewCLI(bc *blockchain.Blockchain, mp *mempool.Mempool, node *p2p.Node) *CLI
 }
 
 func (cli *CLI) Run() {
-	scanner := bufio.NewScanner(os.Stdin)
-
 	fmt.Println("Blockchain CLI")
 	fmt.Println("Type 'help' for commands")
 
 	for {
-		fmt.Print("> ")
-		scanner.Scan()
-		text := scanner.Text()
-
-		if text == "" {
+		input := askFor("> ")
+		if input == "" {
 			continue
 		}
 
-		parts := strings.Fields(text)
+		parts := strings.Fields(input)
 		command := parts[0]
 
-		switch command {
-		case "exit", "quit":
+		if command == "exit" || command == "quit" {
 			return
-		case "help":
-			cli.printHelp()
-		case "createwallet":
-			cli.createWallet()
-		case "listwallet":
-			cli.listWallets()
-		case "balance":
-			if len(parts) < 2 {
-				fmt.Println("Usage: balance <wallet-name>")
-				continue
-			}
-			cli.getBalance(parts[1])
-		case "send":
-			if len(parts) < 4 {
-				fmt.Println("Usage: send <from-wallet> <to-wallet> <amount>")
-				continue
-			}
-			amount, err := strconv.Atoi(parts[3])
-			if err != nil {
-				fmt.Println("Invalid amount:", err)
-				continue
-			}
-			cli.sendCoins(parts[1], parts[2], amount)
-		case "mine":
-			cli.mineBlock()
-		case "blockchain":
-			cli.printBlockchain()
-		case "mempool":
-			cli.showMempool()
-		case "peers":
-			cli.listPeers()
-		case "connect":
-			if len(parts) < 2 {
-				fmt.Println("Usage: connect <peer-address>")
-				continue
-			}
-			cli.connectPeer(parts[1])
-		default:
-			fmt.Println("Unknown command. Type 'help' for commands")
 		}
+
+		handler, exists := cli.commandHandlers[command]
+		if !exists {
+			fmt.Println("Unknown command:", command)
+			cli.printHelp()
+			continue
+		}
+
+		executeCommand(func() error {
+			return handler(parts)
+		})
 	}
 }
 
-func (cli *CLI) printHelp() {
+func (cli *CLI) printHelp() error {
 	fmt.Println("Commands:")
 	fmt.Println("  createwallet         - Create a new wallet")
 	fmt.Println("  listwallet           - List all wallets")
@@ -113,161 +90,130 @@ func (cli *CLI) printHelp() {
 	fmt.Println("  peers                - List connected peers")
 	fmt.Println("  connect <address>    - Connect to a peer")
 	fmt.Println("  exit                 - Exit the program")
+	fmt.Println("  tx <txid>            - View transaction details")
+	return nil
 }
 
-func (cli *CLI) createWallet() {
-	fmt.Print("Enter wallet name: ")
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
-	name := scanner.Text()
-
+func (cli *CLI) createWallet() error {
+	name := askFor("Enter wallet name: ")
 	if name == "" {
-		fmt.Println("Wallet name cannot be empty")
-		return
+		return fmt.Errorf("wallet name cannot be empty")
 	}
 
 	if _, exists := cli.wallets[name]; exists {
-		fmt.Println("Wallet with that name already exists")
-		return
+		return fmt.Errorf("Wallet with that name already exists")
 	}
 
 	cli.wallets[name] = wallet.NewWallet()
-	fmt.Println("Created new wallet:", name)
-	fmt.Println("Address:", cli.wallets[name].GetAddress())
 
 	if err := cli.SaveWallets(); err != nil {
-		fmt.Println("Error saving wallet:", err)
+		return err
 	}
+
+	fmt.Println("Created new wallet:", name)
+	fmt.Println("Address:", cli.wallets[name].GetAddress())
+	return nil
 }
 
-func (cli *CLI) listWallets() {
+func (cli *CLI) listWallets() error {
 	if len(cli.wallets) == 0 {
-		fmt.Println("No wallets created yet. Use 'createwallet' to create one.")
-		return
+		return fmt.Errorf("No wallets created yet. Use 'createwallet' to create one.")
 	}
 
 	fmt.Println("Wallets:")
 	for name, w := range cli.wallets {
 		fmt.Printf("  %s: %s\n", name, w.GetAddress())
 	}
+	return nil
 }
 
-func (cli *CLI) getBalance(walletName string) {
-	w, exists := cli.wallets[walletName]
-	if !exists {
-		fmt.Println("Wallet not found:", walletName)
-		return
+func (cli *CLI) handleBalance(parts []string) error {
+	walletName, ok := getRequiredParam(parts, 1, "Usage: balance <wallet-name>")
+	if !ok {
+		return fmt.Errorf("missing wallet name")
+	}
+
+	w, err := handleWalletLookupError(cli.wallets, walletName)
+	if err != nil {
+		return err
 	}
 
 	address := w.GetAddress()
 	balance := cli.bc.GetBalance(address)
 	fmt.Printf("Balance of %s: %d coins\n", walletName, balance)
+	return nil
 }
 
-func (cli *CLI) sendCoins(fromWallet, toWallet string, amount int) {
-	from, fromExists := cli.wallets[fromWallet]
-	if !fromExists {
-		fmt.Println("Source wallet not found:", fromWallet)
-		return
+func (cli *CLI) handleSend(parts []string) error {
+	if len(parts) < 4 {
+		return fmt.Errorf("Usage: send <from-wallet> <to-wallet> <amount>")
 	}
 
-	to, toExists := cli.wallets[toWallet]
-	if !toExists {
-		fmt.Println("Destination wallet not found:", toWallet)
-		return
+	fromName := parts[1]
+	toName := parts[2]
+
+	amount, err := parseAmount(parts[3])
+	if err != nil {
+		return err
 	}
 
-	fromAddress := from.GetAddress()
-	toAddress := to.GetAddress()
+	from, err := handleWalletLookupError(cli.wallets, fromName)
+	if err != nil {
+		return err
+	}
+
+	to, err := handleWalletLookupError(cli.wallets, toName)
+	if err != nil {
+		return err
+	}
 
 	// Get UTXOs for the sender
+	fromAddress := from.GetAddress()
 	utxos := cli.bc.GetUTXOs(fromAddress)
 
 	// Calculate total available balance
-	balance := 0
-	for _, utxo := range utxos {
-		balance += utxo.Output.Value
+	balance := calculateBalance(utxos)
+
+	if !checkBalance(balance, amount) {
+		return fmt.Errorf("Not enough balance. Available: %d, Required: %d", balance, amount)
 	}
 
-	if balance < amount {
-		fmt.Printf("Not enough balance. Available: %d, Required: %d\n", balance, amount)
-		return
+	// Create transaction
+	tx, err := createTransaction(from, to, amount, utxos)
+	if err != nil {
+		return err
 	}
 
-	// Create transaction inputs from UTXOs
-	var inputs []utxo.TxInput
-	var collected int
-
-	for _, u := range utxos {
-		input := utxo.TxInput{
-			TxID:     u.TxID,
-			OutIndex: u.Index,
-			PubKey:   from.Address,
-		}
-		input.Sign(from.PrivateKey)
-
-		inputs = append(inputs, input)
-		collected += u.Output.Value
-
-		if collected >= amount {
-			break
-		}
-	}
-
-	// Create transaction outputs
-	var outputs []utxo.TxOutput
-
-	// Output to recipient
-	outputs = append(outputs, utxo.TxOutput{
-		Value:      amount,
-		PubKeyHash: []byte(toAddress),
-	})
-
-	// Create change output if needed
-	if collected > amount {
-		outputs = append(outputs, utxo.TxOutput{
-			Value:      collected - amount,
-			PubKeyHash: []byte(fromAddress),
-		})
-	}
-
-	// Create and sign transaction
-	tx := transaction.New(inputs, outputs)
-
-	// Add to mempool
+	// Add to mempool and broadcast
 	cli.mp.Add(tx)
-
-	// Broadcast to network
 	txMsg := p2p.NewTxMessage(tx.Serialize())
 	cli.node.Broadcast(txMsg)
 
 	fmt.Printf("Transaction created: %x\n", tx.ID)
-	fmt.Printf("Sent %d coins from %s to %s\n", amount, fromWallet, toWallet)
+	fmt.Printf("Sent %d coins from %s to %s\n", amount, fromName, toName)
 	fmt.Println("Transaction is in mempool, waiting to be mined")
+	return nil
 }
 
-func (cli *CLI) mineBlock() {
+func (cli *CLI) mineBlock() error {
 	// Get transactions from mempool
 	txs := cli.mp.Flush()
 
 	if len(txs) == 0 {
-		fmt.Println("No transactions in mempool to mine")
-		return
+		return fmt.Errorf("No transactions in mempool to mine")
 	}
 
 	fmt.Printf("Mining new block with %d transactions...\n", len(txs))
 
-	// Add new block to blockchain
 	newBlock := cli.bc.AddBlock(txs)
-
-	// Broadcast the block to the network
 	blockMsg := p2p.NewBlockMessage(newBlock.Serialize())
 	cli.node.Broadcast(blockMsg)
 
 	fmt.Printf("Block mined! Hash: %x, Height: %d\n", newBlock.Hash, newBlock.Height)
+	return nil
 }
 
-func (cli *CLI) printBlockchain() {
+func (cli *CLI) printBlockchain() error {
 	height := cli.bc.CurrentHeight()
 	fmt.Printf("Blockchain height: %d\n", height)
 
@@ -277,42 +223,74 @@ func (cli *CLI) printBlockchain() {
 		if block == nil {
 			continue
 		}
-
-		fmt.Printf("Block %d: %x\n", block.Height, block.Hash)
-		fmt.Printf("  Transactions: %d\n", len(block.Transactions))
-		fmt.Printf("  Timestamp: %s\n", block.Timestamp)
-		fmt.Printf("  Difficulty: %d\n", block.Difficulty)
-		fmt.Println()
+		block.Print()
 	}
+	return nil
 }
 
-func (cli *CLI) showMempool() {
+func (cli *CLI) showMempool() error {
 	count := cli.mp.Count()
 
 	if count == 0 {
-		fmt.Println("Mempool is empty")
-		return
+		fmt.Printf("Mempool is empty")
 	}
 
 	fmt.Printf("Mempool has %d transaction(s)\n", count)
+	return nil
 }
 
-func (cli *CLI) listPeers() {
+func (cli *CLI) listPeers() error {
 	peers := cli.node.GetPeers()
 
 	if len(peers) == 0 {
-		fmt.Println("No peers connected")
-		return
+		fmt.Printf("No peers connected")
 	}
 
 	fmt.Println("Connected peers:")
 	for _, peer := range peers {
 		fmt.Printf("  %s (last seen: %s)\n", peer.Address, peer.LastSeen.Format("15:04:05"))
 	}
+	return nil
 }
 
-func (cli *CLI) connectPeer(address string) {
+func (cli *CLI) handleConnect(parts []string) error {
+	address, ok := getRequiredParam(parts, 1, "Usage: connect <peer-address>")
+	if !ok {
+		return fmt.Errorf("missing peer address")
+	}
+
 	fmt.Printf("Connecting to peer %s...\n", address)
 	cli.node.Connect(address)
 	fmt.Println("Connection initiated")
+	return nil
+}
+
+func (cli *CLI) handleTransactionDetails(parts []string) error {
+	txID, ok := getRequiredParam(parts, 1, "Usage: tx <transaction-id>")
+	if !ok {
+		return fmt.Errorf("missing transaction ID")
+	}
+
+	// Try to find transaction in mempool first
+	tx := cli.mp.Get(txID)
+	source := "mempool"
+
+	// If not in mempool, try to find in blockchain
+	if tx == nil {
+		txHash, err := hex.DecodeString(txID)
+		if err != nil {
+			return fmt.Errorf("Invalid transaction ID format")
+		}
+
+		tx = cli.bc.FindTransaction(txHash)
+		source = "blockchain"
+	}
+
+	if tx == nil {
+		return fmt.Errorf("Transaction not found")
+	}
+
+	fmt.Printf("Transaction Details (from %s):\n", source)
+	tx.Print("  ")
+	return nil
 }

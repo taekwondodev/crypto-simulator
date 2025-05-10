@@ -1,9 +1,7 @@
 package blockchain
 
 import (
-	"bytes"
 	"log"
-	"strconv"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/taekwondodev/crypto-simulator/pkg/block"
@@ -50,36 +48,12 @@ func (bc *Blockchain) Close() {
 
 func (bc *Blockchain) InitHeightIndex() error {
 	return bc.Db.Update(func(tx *bbolt.Tx) error {
-		// Create height index bucket if it doesn't exist
-		_, err := tx.CreateBucketIfNotExists([]byte(heightIndex))
-		if err != nil {
-			return err
-		}
-
-		// Populate index if empty
-		heightBucket := tx.Bucket([]byte(heightIndex))
-		if heightBucket.Get([]byte{0}) == nil { // Check if index is empty
-			blockBucket := tx.Bucket([]byte(blocksBucket))
-			cursor := blockBucket.Cursor()
-
-			for k, v := cursor.First(); k != nil; k, v = cursor.Next() {
-				if bytes.Equal(k, []byte("l")) {
-					continue // Skip tip
-				}
-
-				blk := block.Deserialize(v)
-				// Store hash by height: height -> hash
-				key := []byte(strconv.Itoa(blk.Height))
-				heightBucket.Put(key, blk.Hash)
-			}
-		}
-
-		return nil
+		return createHeightIndex(tx)
 	})
 }
 
 func (bc *Blockchain) AddBlock(txs []*transaction.Transaction) *block.Block {
-	difficulty := bc.adjustDifficulty()
+	difficulty := adjustDifficulty(bc)
 	height := bc.CurrentHeight()
 
 	newBlock := block.New(height+1, txs, bc.tip, difficulty)
@@ -130,6 +104,15 @@ func (bc *Blockchain) VerifyTransaction(tx *transaction.Transaction) bool {
 	return inputSum >= outputSum
 }
 
+func (bc *Blockchain) IsValidChain(newChain []*block.Block) bool {
+	for i := 1; i < len(newChain); i++ {
+		if !newChain[i].Validate(newChain[i-1]) {
+			return false
+		}
+	}
+	return true
+}
+
 func (bc *Blockchain) GetBalance(address string) int {
 	utxos := bc.GetUTXOs(address)
 	balance := 0
@@ -140,25 +123,44 @@ func (bc *Blockchain) GetBalance(address string) int {
 }
 
 func (bc *Blockchain) CurrentDifficulty() int {
-	var lastBlock *block.Block
-	err := bc.Db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(blocksBucket))
-		lastBlock = block.Deserialize(b.Get(bc.tip))
-		return nil
-	})
-	if err != nil {
-		log.Panic(err)
+	lastBlock := bc.LastBlock()
+	if lastBlock == nil {
+		return 1 // Default difficulty
 	}
 	return lastBlock.Difficulty
+}
+
+func (bc *Blockchain) CurrentHeight() int {
+	lastBlock := bc.LastBlock()
+	if lastBlock == nil {
+		return 0
+	}
+	return lastBlock.Height
+}
+
+func (bc *Blockchain) LastBlock() *block.Block {
+	return bc.GetBlock(bc.tip)
 }
 
 func (bc *Blockchain) GetBlock(hash []byte) *block.Block {
 	var blockData []byte
 
 	bc.Db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(blocksBucket))
-		blockData = b.Get(hash)
+		return getBlockByHash(tx, hash, &blockData)
+	})
+
+	if blockData == nil {
 		return nil
+	}
+
+	return block.Deserialize(blockData)
+}
+
+func (bc *Blockchain) GetBlockAtHeight(height int) *block.Block {
+	var blockData []byte
+
+	bc.Db.View(func(tx *bbolt.Tx) error {
+		return getHashBlockByHeight(tx, height, &blockData)
 	})
 
 	if blockData == nil {

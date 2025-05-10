@@ -10,16 +10,6 @@ import (
 	"go.etcd.io/bbolt"
 )
 
-func (bc *Blockchain) IsValidChain(newChain []*block.Block) bool {
-	// Verifica l'intera catena
-	for i := 1; i < len(newChain); i++ {
-		if !newChain[i].Validate(newChain[i-1]) {
-			return false
-		}
-	}
-	return true
-}
-
 func (bc *Blockchain) ReorganizeChain(newChain []*block.Block) error {
 	return bc.Db.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(blocksBucket))

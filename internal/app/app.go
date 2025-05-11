@@ -9,19 +9,14 @@ import (
 
 	"github.com/taekwondodev/crypto-simulator/internal/blockchain"
 	"github.com/taekwondodev/crypto-simulator/internal/cli"
+	"github.com/taekwondodev/crypto-simulator/internal/config"
 	"github.com/taekwondodev/crypto-simulator/internal/mempool"
 	"github.com/taekwondodev/crypto-simulator/internal/p2p"
 	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
 )
 
-type Config struct {
-	Interactive    bool
-	Port           string
-	MiningInterval time.Duration
-}
-
 type App struct {
-	config     Config
+	config     *config.Config
 	blockchain *blockchain.Blockchain
 	mempool    *mempool.Mempool
 	node       *p2p.Node
@@ -29,15 +24,14 @@ type App struct {
 	stopMining chan struct{}
 }
 
-func New(config Config) *App {
-	bc := blockchain.New()
+func New(config *config.Config) *App {
+	bc := blockchain.New(config.DatabasePath)
 	if err := bc.InitHeightIndex(); err != nil {
 		panic(err)
 	}
 
 	mp := mempool.New(bc)
-	bootstrapNodes := []string{"localhost:3000", "localhost:3001"}
-	node := p2p.NewNode(config.Port, bootstrapNodes, bc, mp)
+	node := p2p.NewNode(config.Port, config.BootstrapNodes, bc, mp)
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)

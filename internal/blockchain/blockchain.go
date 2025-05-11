@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	dbFile       = "blockchain.db"
 	utxoBucket   = "utxo"
 	blocksBucket = "blocks"
 	heightIndex  = "height_index"
@@ -23,8 +22,8 @@ type Blockchain struct {
 	utxoCache *lru.Cache[string, []*utxo.UTXO]
 }
 
-func New() *Blockchain {
-	Db, err := bbolt.Open(dbFile, 0600, nil)
+func New(dbPath string) *Blockchain {
+	Db, err := bbolt.Open(dbPath, 0600, nil)
 	if err != nil {
 		log.Panic(err)
 	}

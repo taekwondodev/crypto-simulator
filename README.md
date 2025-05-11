@@ -20,9 +20,9 @@ A blockchain simulator that implements the core concepts of a cryptocurrency net
 
 - **Automatic Mining**: Background mining in non-interactive mode
 
-## Installation
+## Installation
 
-### Prerequisites
+### Prerequisites
 
 - [Go](https://go.dev/doc/install)(1.24.3 or higher)
 
@@ -115,7 +115,7 @@ pkg/                  # Public libraries
   utxo/               # Unspent transaction output model
   wallet/             # Cryptographic wallet implementation
 
-## Contributing
+## Contributing
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
@@ -123,7 +123,7 @@ pkg/                  # Public libraries
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## License
+## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 

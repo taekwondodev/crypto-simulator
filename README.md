@@ -24,7 +24,7 @@ A blockchain simulator that implements the core concepts of a cryptocurrency net
 
 ### Prerequisites
 
-- [Go](https://go.dev/doc/install)(1.24.3 or higher)
+- [Go](https://go.dev/doc/install) (1.24.3 or higher)
 
 ### Building
 

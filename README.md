@@ -58,24 +58,9 @@ go build -o crypto-simulator ./cmd
 - `-mining-interval`: Seconds between automatic mining attempts (default: 60)
 
 
-## Architecture
+## Architecture
 
-┌───────────┐     ┌──────────┐     ┌──────────┐
-│   Node    │◄───►│ Mempool  │◄───►│Blockchain│
-└───────────┘     └──────────┘     └──────────┘
-      ▲                                 ▲
-      │                                 │
-      ▼                                 │
-┌───────────┐                      ┌──────────┐
-│   P2P     │                      │  UTXO    │
-│  Network  │                      │   Set    │
-└───────────┘                      └──────────┘
-      ▲
-      │
-      ▼
-┌───────────┐
-│  Wallets  │
-└───────────┘
+![Project Structure](https://github.com/user-attachments/assets/78ec8b6d-2d24-4f03-8ca4-4a992e1143cd)
 
 - **Blockchain**: Core data structure that stores blocks of transactions
 - **Mempool**: Temporary storage for unconfirmed transactions

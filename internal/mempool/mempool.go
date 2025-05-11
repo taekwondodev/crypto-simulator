@@ -62,7 +62,6 @@ func (m *Mempool) ValidateTransaction(tx *transaction.Transaction) bool {
 		return true
 	}
 
-	// Delegate to blockchain for UTXO verification
 	return m.bc.VerifyTransaction(tx)
 }
 

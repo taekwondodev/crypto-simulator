@@ -171,20 +171,16 @@ func (cli *CLI) handleSend(parts []string) error {
 	fromAddress := from.GetAddress()
 	utxos := cli.bc.GetUTXOs(fromAddress)
 
-	// Calculate total available balance
 	balance := calculateBalance(utxos)
-
 	if !checkBalance(balance, amount) {
 		return fmt.Errorf("Not enough balance. Available: %d, Required: %d", balance, amount)
 	}
 
-	// Create transaction
 	tx, err := createTransaction(from, to, amount, utxos)
 	if err != nil {
 		return err
 	}
 
-	// Add to mempool and broadcast
 	cli.mp.Add(tx)
 	txMsg := p2p.NewTxMessage(tx.Serialize())
 	cli.node.Broadcast(txMsg)

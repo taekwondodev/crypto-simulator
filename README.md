@@ -101,7 +101,21 @@ go build -o crypto-simulator ./cmd
 
 ## Project Structure
 
-<pre><code>```text cmd/ # Application entry points internal/ # Private application code app/ # Application coordinator blockchain/ # Core blockchain implementation cli/ # Command-line interface config/ # Configuration handling mempool/ # Transaction memory pool p2p/ # Peer-to-peer networking pkg/ # Public libraries block/ # Block structure and validation transaction/ # Transaction structure and handling utxo/ # Unspent transaction output model wallet/ # Cryptographic wallet implementation ```</code></pre>
+```text
+cmd/                   # Application entry points
+internal/              # Private application code
+  app/                 # Application coordinator
+  blockchain/          # Core blockchain implementation
+  cli/                 # Command-line interface
+  config/              # Configuration handling
+  mempool/             # Transaction memory pool
+  p2p/                 # Peer-to-peer networking
+pkg/                   # Public libraries
+  block/               # Block structure and validation
+  transaction/         # Transaction structure and handling
+  utxo/                # Unspent transaction output model
+  wallet/              # Cryptographic wallet implementation
+```
 
 ## Contributing
 

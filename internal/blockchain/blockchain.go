@@ -1,6 +1,7 @@
 package blockchain
 
 import (
+	"fmt"
 	"log"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -8,12 +9,6 @@ import (
 	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
 	"github.com/taekwondodev/crypto-simulator/pkg/utxo"
 	"go.etcd.io/bbolt"
-)
-
-const (
-	utxoBucket   = "utxo"
-	blocksBucket = "blocks"
-	heightIndex  = "height_index"
 )
 
 type Blockchain struct {
@@ -45,33 +40,49 @@ func (bc *Blockchain) Close() {
 	bc.Db.Close()
 }
 
-func (bc *Blockchain) InitHeightIndex() error {
-	return bc.Db.Update(func(tx *bbolt.Tx) error {
+func (bc *Blockchain) InitHeightIndex() {
+	err := bc.Db.Update(func(tx *bbolt.Tx) error {
 		return createHeightIndex(tx)
 	})
+
+	if err != nil {
+		log.Panic(err)
+	}
 }
 
-func (bc *Blockchain) AddBlock(txs []*transaction.Transaction) *block.Block {
-	difficulty := adjustDifficulty(bc)
-	height := bc.CurrentHeight()
+func (bc *Blockchain) AddBlock(txs []*transaction.Transaction) (*block.Block, error) {
+	difficulty, err := adjustDifficulty(bc)
+	if err != nil {
+		return nil, err
+	}
+	height, err := bc.CurrentHeight()
+	if err != nil {
+		return nil, err
+	}
 
-	newBlock := block.New(height+1, txs, bc.tip, difficulty)
-	newBlock.Mine()
+	newBlock, err := block.New(height+1, txs, bc.tip, difficulty)
+	if err != nil {
+		return nil, err
+	}
+	err = newBlock.Mine()
+	if err != nil {
+		return nil, err
+	}
 
-	err := bc.Db.Update(func(tx *bbolt.Tx) error {
+	err = bc.Db.Update(func(tx *bbolt.Tx) error {
 		return addBlockToDb(tx, bc, newBlock)
 	})
 
 	if err != nil {
-		log.Panic("Failed to persist block:", err)
+		return nil, fmt.Errorf("Failed to persist block: %w", err)
 	}
 
-	return newBlock
+	return newBlock, nil
 }
 
-func (bc *Blockchain) GetUTXOs(address string) []*utxo.UTXO {
+func (bc *Blockchain) GetUTXOs(address string) ([]*utxo.UTXO, error) {
 	if cached, ok := bc.utxoCache.Get(address); ok {
-		return cached
+		return cached, nil
 	}
 
 	var utxos []*utxo.UTXO
@@ -80,11 +91,11 @@ func (bc *Blockchain) GetUTXOs(address string) []*utxo.UTXO {
 	})
 
 	if err != nil {
-		log.Panic(err)
+		return nil, err
 	}
 
 	bc.utxoCache.Add(address, utxos)
-	return utxos
+	return utxos, nil
 }
 
 func (bc *Blockchain) VerifyTransaction(tx *transaction.Transaction) bool {
@@ -112,50 +123,63 @@ func (bc *Blockchain) IsValidChain(newChain []*block.Block) bool {
 	return true
 }
 
-func (bc *Blockchain) GetBalance(address string) int {
-	utxos := bc.GetUTXOs(address)
+func (bc *Blockchain) GetBalance(address string) (int, error) {
+	utxos, err := bc.GetUTXOs(address)
+	if err != nil {
+		return -1, err
+	}
 	balance := 0
 	for _, utxo := range utxos {
 		balance += utxo.Output.Value
 	}
-	return balance
+	return balance, nil
 }
 
-func (bc *Blockchain) CurrentDifficulty() int {
-	lastBlock := bc.LastBlock()
-	if lastBlock == nil {
-		return 1 // Default difficulty
+func (bc *Blockchain) CurrentDifficulty() (int, error) {
+	lastBlock, err := bc.LastBlock()
+	if err != nil {
+		return -1, err
 	}
-	return lastBlock.Difficulty
-}
-
-func (bc *Blockchain) CurrentHeight() int {
-	lastBlock := bc.LastBlock()
 	if lastBlock == nil {
-		return 0
+		return 1, nil // Default difficulty
 	}
-	return lastBlock.Height
+	return lastBlock.Difficulty, nil
 }
 
-func (bc *Blockchain) LastBlock() *block.Block {
+func (bc *Blockchain) CurrentHeight() (int, error) {
+	lastBlock, err := bc.LastBlock()
+	if err != nil {
+		return -1, err
+	}
+	if lastBlock == nil {
+		return 0, nil
+	}
+	return lastBlock.Height, nil
+}
+
+func (bc *Blockchain) LastBlock() (*block.Block, error) {
 	return bc.GetBlock(bc.tip)
 }
 
-func (bc *Blockchain) GetBlock(hash []byte) *block.Block {
+func (bc *Blockchain) GetBlock(hash []byte) (*block.Block, error) {
 	var blockData []byte
 
-	bc.Db.View(func(tx *bbolt.Tx) error {
+	err := bc.Db.View(func(tx *bbolt.Tx) error {
 		return getBlockByHash(tx, hash, &blockData)
 	})
 
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve block: %w", err)
+	}
+
 	if blockData == nil {
-		return nil
+		return nil, nil
 	}
 
 	return block.Deserialize(blockData)
 }
 
-func (bc *Blockchain) GetBlockAtHeight(height int) *block.Block {
+func (bc *Blockchain) GetBlockAtHeight(height int) (*block.Block, error) {
 	var blockData []byte
 
 	bc.Db.View(func(tx *bbolt.Tx) error {
@@ -163,7 +187,7 @@ func (bc *Blockchain) GetBlockAtHeight(height int) *block.Block {
 	})
 
 	if blockData == nil {
-		return nil
+		return nil, nil
 	}
 
 	return block.Deserialize(blockData)

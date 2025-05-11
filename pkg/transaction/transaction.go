@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/gob"
 	"fmt"
-	"log"
 
 	"github.com/taekwondodev/crypto-simulator/pkg/utxo"
 )
@@ -16,58 +15,70 @@ type Transaction struct {
 	Outputs []utxo.TxOutput
 }
 
-// First transaction in the blockchain, usually called the coinbase transaction
-func NewCoinBaseTx(to string, value int) *Transaction {
+// First transaction in the blockchain, called the coinbase transaction
+func NewCoinBaseTx(to string, value int) (*Transaction, error) {
 	tx := &Transaction{
 		Outputs: []utxo.TxOutput{
 			{Value: value, PubKeyHash: []byte(to)},
 		},
 	}
 
-	tx.ID = tx.hash()
-	return tx
+	hash, err := tx.hash()
+	if err != nil {
+		return nil, err
+	}
+	tx.ID = hash
+	return tx, nil
 }
 
-func New(inputs []utxo.TxInput, outputs []utxo.TxOutput) *Transaction {
+func New(inputs []utxo.TxInput, outputs []utxo.TxOutput) (*Transaction, error) {
 	tx := &Transaction{
 		Inputs:  inputs,
 		Outputs: outputs,
 	}
 
-	tx.ID = tx.hash()
-	return tx
+	hash, err := tx.hash()
+	if err != nil {
+		return nil, err
+	}
+	tx.ID = hash
+	return tx, nil
 }
 
-func (tx *Transaction) hash() []byte {
+func (tx *Transaction) hash() ([]byte, error) {
 	var hash [32]byte
 	txCopy := *tx
 	txCopy.ID = []byte{}
-	hash = sha256.Sum256(txCopy.Serialize())
-	return hash[:]
+	data, err := txCopy.Serialize()
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize transaction: %w", err)
+	}
+	hash = sha256.Sum256(data)
+	return hash[:], nil
 }
 
 func (tx *Transaction) IsCoinBase() bool {
 	return len(tx.Inputs) == 0
 }
 
-func (tx *Transaction) Serialize() []byte {
+func (tx *Transaction) Serialize() ([]byte, error) {
 	var buffer bytes.Buffer
 	encoder := gob.NewEncoder(&buffer)
 	err := encoder.Encode(tx)
 	if err != nil {
-		log.Panic(err)
+		return nil, fmt.Errorf("failed to serialize transaction: %w", err)
 	}
-	return buffer.Bytes()
+	return buffer.Bytes(), nil
 }
 
-func Deserialize(data []byte) *Transaction {
+func Deserialize(data []byte) (*Transaction, error) {
 	var tx Transaction
 	decoder := gob.NewDecoder(bytes.NewReader(data))
 	err := decoder.Decode(&tx)
 	if err != nil {
-		log.Panic("Failed to deserialize transaction:", err)
+		return nil, fmt.Errorf("Failed to deserialize transaction: %w", err)
 	}
-	return &tx
+	return &tx, nil
 }
 
 func (tx *Transaction) Print(indent string) {

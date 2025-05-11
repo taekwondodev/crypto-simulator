@@ -48,7 +48,10 @@ func (bc *Blockchain) FindTransaction(id []byte) *transaction.Transaction {
 				continue
 			}
 
-			block := block.Deserialize(v)
+			block, err := block.Deserialize(v)
+			if err != nil {
+				return err
+			}
 
 			for _, transaction := range block.Transactions {
 				if bytes.Equal(transaction.ID, id) {
@@ -71,7 +74,10 @@ func (bc *Blockchain) getChainFrom(startHash []byte) []*block.Block {
 	bc.Db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 		for currentHash != nil {
-			blk := block.Deserialize(b.Get(currentHash))
+			blk, err := block.Deserialize(b.Get(currentHash))
+			if err != nil {
+				return err
+			}
 			chain = append(chain, blk)
 			currentHash = blk.PreviousHash
 		}
@@ -80,26 +86,32 @@ func (bc *Blockchain) getChainFrom(startHash []byte) []*block.Block {
 	return reverseChain(chain)
 }
 
-func (bc *Blockchain) GetBlockLocator(lastKnownHash []byte) [][]byte {
+func (bc *Blockchain) GetBlockLocator(lastKnownHash []byte) ([][]byte, error) {
 	var locator [][]byte
 	step := 1
 	currentHash := bc.tip
 
 	for range 10 { // Limita a 10 hop
 		locator = append(locator, currentHash)
-		block := bc.GetBlock(currentHash)
+		block, err := bc.GetBlock(currentHash)
+		if err != nil {
+			return nil, err
+		}
 		if block == nil {
 			break
 		}
 
 		for range step {
 			currentHash = block.PreviousHash
-			block = bc.GetBlock(currentHash)
+			block, err = bc.GetBlock(currentHash)
+			if err != nil {
+				return nil, err
+			}
 			if block == nil {
 				break
 			}
 		}
 		step *= 2
 	}
-	return locator
+	return locator, nil
 }

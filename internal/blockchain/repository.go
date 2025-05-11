@@ -12,6 +12,9 @@ import (
 )
 
 const (
+	utxoBucket      = "utxo"
+	blocksBucket    = "blocks"
+	heightIndex     = "height_index"
 	blocksToAdjust  = 10
 	targetBlockTime = 2 * time.Minute
 )
@@ -34,11 +37,21 @@ func createGenesisBlock(tx *bbolt.Tx, tip *[]byte) error {
 	}
 
 	// Create coinbase transaction for genesis block
-	coinbase := transaction.NewCoinBaseTx("Genesis", 50)
-	genesis := block.New(0, []*transaction.Transaction{coinbase}, []byte{}, 1)
+	coinbase, err := transaction.NewCoinBaseTx("Genesis", 50)
+	if err != nil {
+		return err
+	}
+	genesis, err := block.New(0, []*transaction.Transaction{coinbase}, []byte{}, 1)
+	if err != nil {
+		return err
+	}
 
 	// Store genesis block
-	blocksBucket.Put(genesis.Hash, genesis.Serialize())
+	serialize, err := genesis.Serialize()
+	if err != nil {
+		return err
+	}
+	blocksBucket.Put(genesis.Hash, serialize)
 	blocksBucket.Put([]byte("l"), genesis.Hash)
 	*tip = genesis.Hash // Initialize UTXO set with genesis block
 	// Store UTXOs from coinbase transaction
@@ -47,8 +60,12 @@ func createGenesisBlock(tx *bbolt.Tx, tip *[]byte) error {
 		Index:  0,
 		Output: coinbase.Outputs[0],
 	}
-	key := append(coinbase.ID, byte(0))
-	utxoBucket.Put(key, utxo.Serialize())
+	key := buildUTXOKey(coinbase.ID, 0)
+	serialized, err := utxo.Serialize()
+	if err != nil {
+		return err
+	}
+	utxoBucket.Put(key, serialized)
 
 	return nil
 }
@@ -71,7 +88,10 @@ func createHeightIndex(tx *bbolt.Tx) error {
 				continue // Skip tip
 			}
 
-			blk := block.Deserialize(v)
+			blk, err := block.Deserialize(v)
+			if err != nil {
+				return err
+			}
 			// Store hash by height: height -> hash
 			key := []byte(strconv.Itoa(blk.Height))
 			heightBucket.Put(key, blk.Hash)
@@ -84,7 +104,11 @@ func createHeightIndex(tx *bbolt.Tx) error {
 func addBlockToDb(tx *bbolt.Tx, bc *Blockchain, newBlock *block.Block) error {
 	b := tx.Bucket([]byte(blocksBucket))
 	heightBucket := tx.Bucket([]byte(heightIndex))
-	b.Put(newBlock.Hash, newBlock.Serialize())
+	serialize, err := newBlock.Serialize()
+	if err != nil {
+		return err
+	}
+	b.Put(newBlock.Hash, serialize)
 	b.Put([]byte("l"), newBlock.Hash)
 	bc.tip = newBlock.Hash
 
@@ -106,13 +130,11 @@ func updateUTXOSet(tx *bbolt.Tx, b *block.Block) error {
 		// Remove spent outputs
 		if !tx.IsCoinBase() {
 			for _, input := range tx.Inputs {
-				// Construct key for UTXO lookup
-				key := append(input.TxID, byte(input.OutIndex))
+				key := buildUTXOKey(input.TxID, input.OutIndex)
 				bucket.Delete(key)
 			}
 		}
 
-		// Add new outputs as UTXOs
 		for i, output := range tx.Outputs {
 			utxo := &utxo.UTXO{
 				TxID:   tx.ID,
@@ -120,8 +142,12 @@ func updateUTXOSet(tx *bbolt.Tx, b *block.Block) error {
 				Output: output,
 			}
 
-			key := append(tx.ID, byte(i))
-			bucket.Put(key, utxo.Serialize())
+			key := buildUTXOKey(tx.ID, i)
+			serialize, err := utxo.Serialize()
+			if err != nil {
+				return err
+			}
+			bucket.Put(key, serialize)
 		}
 	}
 
@@ -131,10 +157,15 @@ func updateUTXOSet(tx *bbolt.Tx, b *block.Block) error {
 func getUTXOs(tx *bbolt.Tx, address string, utxos *[]*utxo.UTXO) error {
 	b := tx.Bucket([]byte(utxoBucket))
 	c := b.Cursor()
-	prefix := []byte(address + "_")
 
-	for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-		*utxos = append(*utxos, utxo.Deserialize(v))
+	for k, v := c.First(); k != nil; k, v = c.Next() {
+		utxo, err := utxo.Deserialize(v)
+		if err != nil {
+			return err
+		}
+		if bytes.Equal(utxo.Output.PubKeyHash, []byte(address)) {
+			*utxos = append(*utxos, utxo)
+		}
 	}
 	return nil
 }
@@ -173,7 +204,7 @@ func rollbackTransactions(bc *Blockchain, chain []*block.Block, forkPoint *block
 	return nil
 }
 
-func restoreUTXOsFromInputs(bc *Blockchain, tx *transaction.Transaction, bucket *bbolt.Bucket) {
+func restoreUTXOsFromInputs(bc *Blockchain, tx *transaction.Transaction, bucket *bbolt.Bucket) error {
 	for _, input := range tx.Inputs {
 		origTx := bc.FindTransaction(input.TxID)
 		if origTx != nil {
@@ -183,9 +214,14 @@ func restoreUTXOsFromInputs(bc *Blockchain, tx *transaction.Transaction, bucket 
 				Output: origTx.Outputs[input.OutIndex],
 			}
 			key := buildUTXOKey(input.TxID, input.OutIndex)
-			bucket.Put(key, utxo.Serialize())
+			serialize, err := utxo.Serialize()
+			if err != nil {
+				return err
+			}
+			bucket.Put(key, serialize)
 		}
 	}
+	return nil
 }
 
 func removeUTXOsFromOutputs(tx *transaction.Transaction, bucket *bbolt.Bucket) {
@@ -208,7 +244,11 @@ func applyNewChainBlocks(chain []*block.Block, forkPoint *block.Block, blockBuck
 			addUTXOsFromOutputs(tx, utxoBucket)
 		}
 
-		blockBucket.Put(blk.Hash, blk.Serialize())
+		serialize, err := blk.Serialize()
+		if err != nil {
+			return err
+		}
+		blockBucket.Put(blk.Hash, serialize)
 	}
 	return nil
 }
@@ -220,7 +260,7 @@ func spendUTXOsFromInputs(tx *transaction.Transaction, bucket *bbolt.Bucket) {
 	}
 }
 
-func addUTXOsFromOutputs(tx *transaction.Transaction, bucket *bbolt.Bucket) {
+func addUTXOsFromOutputs(tx *transaction.Transaction, bucket *bbolt.Bucket) error {
 	for i, output := range tx.Outputs {
 		utxo := &utxo.UTXO{
 			TxID:   tx.ID,
@@ -228,6 +268,11 @@ func addUTXOsFromOutputs(tx *transaction.Transaction, bucket *bbolt.Bucket) {
 			Output: output,
 		}
 		key := buildUTXOKey(tx.ID, i)
-		bucket.Put(key, utxo.Serialize())
+		serialize, err := utxo.Serialize()
+		if err != nil {
+			return err
+		}
+		bucket.Put(key, serialize)
 	}
+	return nil
 }

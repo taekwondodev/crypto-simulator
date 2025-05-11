@@ -139,7 +139,10 @@ func (cli *CLI) handleBalance(parts []string) error {
 	}
 
 	address := w.GetAddress()
-	balance := cli.bc.GetBalance(address)
+	balance, err := cli.bc.GetBalance(address)
+	if err != nil {
+		return err
+	}
 	fmt.Printf("Balance of %s: %d coins\n", walletName, balance)
 	return nil
 }
@@ -169,7 +172,10 @@ func (cli *CLI) handleSend(parts []string) error {
 
 	// Get UTXOs for the sender
 	fromAddress := from.GetAddress()
-	utxos := cli.bc.GetUTXOs(fromAddress)
+	utxos, err := cli.bc.GetUTXOs(fromAddress)
+	if err != nil {
+		return err
+	}
 
 	balance := calculateBalance(utxos)
 	if !checkBalance(balance, amount) {
@@ -182,7 +188,11 @@ func (cli *CLI) handleSend(parts []string) error {
 	}
 
 	cli.mp.Add(tx)
-	txMsg := p2p.NewTxMessage(tx.Serialize())
+	serialize, err := tx.Serialize()
+	if err != nil {
+		return err
+	}
+	txMsg := p2p.NewTxMessage(serialize)
 	cli.node.Broadcast(txMsg)
 
 	fmt.Printf("Transaction created: %x\n", tx.ID)
@@ -201,8 +211,15 @@ func (cli *CLI) mineBlock() error {
 
 	fmt.Printf("Mining new block with %d transactions...\n", len(txs))
 
-	newBlock := cli.bc.AddBlock(txs)
-	blockMsg := p2p.NewBlockMessage(newBlock.Serialize())
+	newBlock, err := cli.bc.AddBlock(txs)
+	if err != nil {
+		return err
+	}
+	serialize, err := newBlock.Serialize()
+	if err != nil {
+		return err
+	}
+	blockMsg := p2p.NewBlockMessage(serialize)
 	cli.node.Broadcast(blockMsg)
 
 	fmt.Printf("Block mined! Hash: %x, Height: %d\n", newBlock.Hash, newBlock.Height)
@@ -210,12 +227,18 @@ func (cli *CLI) mineBlock() error {
 }
 
 func (cli *CLI) printBlockchain() error {
-	height := cli.bc.CurrentHeight()
+	height, err := cli.bc.CurrentHeight()
+	if err != nil {
+		return err
+	}
 	fmt.Printf("Blockchain height: %d\n", height)
 
 	fmt.Println("Latest blocks:")
 	for i := height; i >= 0 && i > height-10; i-- {
-		block := cli.bc.GetBlockAtHeight(i)
+		block, err := cli.bc.GetBlockAtHeight(i)
+		if err != nil {
+			return err
+		}
 		if block == nil {
 			continue
 		}

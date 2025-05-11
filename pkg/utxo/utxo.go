@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/gob"
 	"fmt"
-	"log"
 )
 
 type UTXO struct {
@@ -35,22 +34,22 @@ func (in *TxInput) Sign(privateKey *ecdsa.PrivateKey) {
 	in.Signature = append(r.Bytes(), s.Bytes()...)
 }
 
-func (u *UTXO) Serialize() []byte {
+func (u *UTXO) Serialize() ([]byte, error) {
 	var buffer bytes.Buffer
 	encoder := gob.NewEncoder(&buffer)
 	err := encoder.Encode(u)
 	if err != nil {
-		log.Panic(err)
+		return nil, fmt.Errorf("failed to serialize UTXO: %w", err)
 	}
-	return buffer.Bytes()
+	return buffer.Bytes(), nil
 }
 
-func Deserialize(data []byte) *UTXO {
+func Deserialize(data []byte) (*UTXO, error) {
 	var utxo UTXO
 	decoder := gob.NewDecoder(bytes.NewReader(data))
 	err := decoder.Decode(&utxo)
 	if err != nil {
-		log.Panic(err)
+		return nil, fmt.Errorf("failed to deserialize UTXO: %w", err)
 	}
-	return &utxo
+	return &utxo, nil
 }

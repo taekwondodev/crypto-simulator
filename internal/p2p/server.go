@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 
@@ -60,13 +61,25 @@ func (n *Node) handlePong() error {
 }
 
 func (n *Node) handleBlock(msg *Message) error {
-	newBlock := block.Deserialize(msg.Payload)
+	newBlock, err := block.Deserialize(msg.Payload)
+	if err != nil {
+		return err
+	}
 
-	lastBlock := n.blockchain.LastBlock()
+	lastBlock, err := n.blockchain.LastBlock()
+	if err != nil {
+		return err
+	}
 
 	if shouldAddBlock(newBlock, lastBlock) {
 		return n.processNewBlock(newBlock, lastBlock)
-	} else if isPotentialFork(newBlock, n.blockchain.CurrentHeight()) {
+	}
+
+	height, err := n.blockchain.CurrentHeight()
+	if err != nil {
+		return err
+	}
+	if isPotentialFork(newBlock, height) {
 		return n.handlePotentialFork(newBlock)
 	}
 
@@ -74,7 +87,10 @@ func (n *Node) handleBlock(msg *Message) error {
 }
 
 func (n *Node) handleTransaction(msg *Message) error {
-	tx := transaction.Deserialize(msg.Payload)
+	tx, err := transaction.Deserialize(msg.Payload)
+	if err != nil {
+		return err
+	}
 
 	if n.mempool.ValidateTransaction(tx) {
 		n.mempool.Add(tx)
@@ -91,7 +107,10 @@ func (n *Node) handleGetBlocks(msg *Message, conn net.Conn) error {
 	}
 
 	// Get block locator (list of hashes to help peer sync)
-	locator := n.blockchain.GetBlockLocator(lastKnownHash)
+	locator, err := n.blockchain.GetBlockLocator(lastKnownHash)
+	if err != nil {
+		return err
+	}
 	return sendInvMessage(conn, locator)
 }
 
@@ -101,7 +120,11 @@ func (n *Node) handleInventory(msg *Message, conn net.Conn) error {
 		return err
 	}
 
-	unknownHashes := n.collectUnknownBlockHashes(hashes)
+	unknownHashes, err := n.collectUnknownBlockHashes(hashes)
+	if err != nil {
+		return err
+	}
+
 	if len(unknownHashes) > 0 {
 		return sendGetDataMessage(conn, unknownHashes)
 	}
@@ -159,8 +182,11 @@ func isPotentialFork(newBlock *block.Block, currentHeight int) bool {
 
 func (n *Node) processNewBlock(newBlock, lastBlock *block.Block) error {
 	if newBlock.Validate(lastBlock) {
-		n.blockchain.AddBlock(newBlock.Transactions)
-		log.Printf("Added new block: %x at height %d", newBlock.Hash, newBlock.Height)
+		nb, err := n.blockchain.AddBlock(newBlock.Transactions)
+		if err != nil {
+			return err
+		}
+		log.Printf("Added new block: %x at height %d", nb.Hash, nb.Height)
 	} else {
 		log.Printf("Received invalid block: %x", newBlock.Hash)
 	}
@@ -174,51 +200,72 @@ func (n *Node) handlePotentialFork(newBlock *block.Block) error {
 		return err
 	}
 
-	if n.blockchain.IsValidChain(candidateChain) {
-		if err := n.blockchain.ReorganizeChain(candidateChain); err != nil {
-			log.Printf("Chain reorganization failed: %v", err)
-			return err
-		}
-
-		tipBlock := candidateChain[len(candidateChain)-1]
-		log.Printf("Chain reorganized to new tip: %x at height %d",
-			tipBlock.Hash, tipBlock.Height)
+	if !n.blockchain.IsValidChain(candidateChain) {
+		return fmt.Errorf("Candidate chain is not valid")
 	}
+
+	if err := n.blockchain.ReorganizeChain(candidateChain); err != nil {
+		log.Printf("Chain reorganization failed: %v", err)
+		return err
+	}
+
+	tipBlock := candidateChain[len(candidateChain)-1]
+	log.Printf("Chain reorganized to new tip: %x at height %d",
+		tipBlock.Hash, tipBlock.Height)
 
 	return nil
 }
 
-func (n *Node) collectUnknownBlockHashes(hashes [][]byte) [][]byte {
+func (n *Node) collectUnknownBlockHashes(hashes [][]byte) ([][]byte, error) {
 	var unknownHashes [][]byte
 
 	for _, hash := range hashes {
-		if n.blockchain.GetBlock(hash) == nil {
+		block, err := n.blockchain.GetBlock(hash)
+		if err != nil {
+			return nil, err
+		}
+		if block == nil {
 			unknownHashes = append(unknownHashes, hash)
 		}
 	}
 
-	return unknownHashes
+	return unknownHashes, nil
 }
 
 func (n *Node) sendRequestedData(hash []byte, conn net.Conn) error {
 	// Check if it's a block hash
-	blk := n.blockchain.GetBlock(hash)
+	blk, err := n.blockchain.GetBlock(hash)
+	if err != nil {
+		return err
+	}
 	if blk != nil {
-		return sendBlockMessage(conn, blk.Serialize())
+		serialize, err := blk.Serialize()
+		if err != nil {
+			return err
+		}
+		return sendBlockMessage(conn, serialize)
 	}
 
 	txID := hex.EncodeToString(hash)
 	tx := n.mempool.Get(txID)
 	if tx != nil {
 		log.Printf("Sending requested transaction from mempool: %s", txID)
-		return sendTxMessage(conn, tx.Serialize())
+		serialize, err := tx.Serialize()
+		if err != nil {
+			return err
+		}
+		return sendTxMessage(conn, serialize)
 	}
 
 	// If not in mempool, check if it's a transaction in the blockchain
 	tx = n.blockchain.FindTransaction(hash)
 	if tx != nil {
 		log.Printf("Sending requested transaction from blockchain: %s", txID)
-		return sendTxMessage(conn, tx.Serialize())
+		serialize, err := tx.Serialize()
+		if err != nil {
+			return err
+		}
+		return sendTxMessage(conn, serialize)
 	}
 
 	log.Printf("Requested data not found for hash: %x", hash)

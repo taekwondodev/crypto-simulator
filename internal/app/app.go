@@ -26,9 +26,7 @@ type App struct {
 
 func New(config *config.Config) *App {
 	bc := blockchain.New(config.DatabasePath)
-	if err := bc.InitHeightIndex(); err != nil {
-		panic(err)
-	}
+	bc.InitHeightIndex()
 
 	mp := mempool.New(bc)
 	node := p2p.NewNode(config.Port, config.BootstrapNodes, bc, mp)
@@ -90,29 +88,43 @@ func (a *App) automaticMining() {
 	for {
 		select {
 		case <-ticker.C:
-			a.mineNewBlock()
+			if err := a.mineNewBlock(); err != nil {
+				fmt.Printf("Error mining block: %v\n", err)
+			}
 		case <-a.stopMining:
 			return
 		}
 	}
 }
 
-func (a *App) mineNewBlock() {
+func (a *App) mineNewBlock() error {
 	txs := a.mempool.Flush()
 
 	// If mempool is empty, create a coinbase transaction
 	if len(txs) == 0 {
-		coinbase := transaction.NewCoinBaseTx("MiningReward", 50)
+		coinbase, err := transaction.NewCoinBaseTx("MiningReward", 50)
+		if err != nil {
+			return err
+		}
 		txs = []*transaction.Transaction{coinbase}
 		fmt.Println("Mining empty block with coinbase transaction only")
 	} else {
 		fmt.Printf("Mining new block with %d transactions from mempool\n", len(txs))
 	}
 
-	newBlock := a.blockchain.AddBlock(txs)
-	blockMsg := p2p.NewBlockMessage(newBlock.Serialize())
+	newBlock, err := a.blockchain.AddBlock(txs)
+	if err != nil {
+		return err
+	}
+	serialize, err := newBlock.Serialize()
+	if err != nil {
+		return err
+	}
+	blockMsg := p2p.NewBlockMessage(serialize)
 	a.node.Broadcast(blockMsg)
 
 	fmt.Printf("Block mined! Hash: %x, Height: %d, Transactions: %d\n",
 		newBlock.Hash, newBlock.Height, len(newBlock.Transactions))
+
+	return nil
 }

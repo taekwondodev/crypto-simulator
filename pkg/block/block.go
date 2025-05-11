@@ -6,7 +6,6 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +23,8 @@ type Block struct {
 	Hash         []byte
 }
 
-func New(height int, transactions []*transaction.Transaction, prevHash []byte, difficulty int) *Block {
+func New(height int, transactions []*transaction.Transaction, prevHash []byte, difficulty int) (*Block, error) {
+	var err error
 	block := &Block{
 		Height:       height,
 		Timestamp:    time.Now(),
@@ -33,20 +33,22 @@ func New(height int, transactions []*transaction.Transaction, prevHash []byte, d
 		Nonce:        0,
 		Difficulty:   difficulty,
 	}
-	block.Hash = block.calculateHash()
-	return block
+	block.Hash, err = block.calculateHash()
+	return block, err
 }
 
-func (b *Block) Mine() {
+func (b *Block) Mine() error {
 	target := strings.Repeat("0", b.Difficulty)
+	var err error
 	for {
 		hashStr := hex.EncodeToString(b.Hash)
 		if strings.HasPrefix(hashStr, target) {
 			break
 		}
 		b.Nonce++
-		b.Hash = b.calculateHash()
+		b.Hash, err = b.calculateHash()
 	}
+	return err
 }
 
 func (b *Block) Validate(prevBlock *Block) bool {
@@ -56,8 +58,8 @@ func (b *Block) Validate(prevBlock *Block) bool {
 	}
 
 	// Verify the hash value matches the block content
-	calculatedHash := b.calculateHash()
-	if !bytes.Equal(calculatedHash, b.Hash) {
+	calculatedHash, err := b.calculateHash()
+	if err != nil || !bytes.Equal(calculatedHash, b.Hash) {
 		return false
 	}
 
@@ -76,49 +78,53 @@ func (b *Block) Validate(prevBlock *Block) bool {
 	return true
 }
 
-func (b *Block) calculateHash() []byte {
+func (b *Block) calculateHash() ([]byte, error) {
+	tx, err := serializeTransactions(b.Transactions)
+	if err != nil {
+		return nil, err
+	}
 	data := bytes.Join(
 		[][]byte{
 			[]byte(b.Timestamp.String()),
 			b.PreviousHash,
-			serializeTransactions(b.Transactions),
+			tx,
 			[]byte(strconv.Itoa(b.Nonce)),
 			[]byte(strconv.Itoa(b.Difficulty)),
 		},
 		[]byte{},
 	)
 	hash := sha256.Sum256(data)
-	return hash[:]
+	return hash[:], nil
 }
 
-func serializeTransactions(txs []*transaction.Transaction) []byte {
+func serializeTransactions(txs []*transaction.Transaction) ([]byte, error) {
 	var buffer bytes.Buffer
 	encoder := gob.NewEncoder(&buffer)
 	err := encoder.Encode(txs)
 	if err != nil {
-		log.Panic("Failed to serialize transactions:", err)
+		return nil, fmt.Errorf("Failed to serialize transactions: %w", err)
 	}
-	return buffer.Bytes()
+	return buffer.Bytes(), nil
 }
 
-func (b *Block) Serialize() []byte {
+func (b *Block) Serialize() ([]byte, error) {
 	var buffer bytes.Buffer
 	encoder := gob.NewEncoder(&buffer)
 	err := encoder.Encode(b)
 	if err != nil {
-		log.Panic("Failed to serialize block:", err)
+		return nil, fmt.Errorf("Failed to serialize block: %w", err)
 	}
-	return buffer.Bytes()
+	return buffer.Bytes(), nil
 }
 
-func Deserialize(data []byte) *Block {
+func Deserialize(data []byte) (*Block, error) {
 	var block Block
 	decoder := gob.NewDecoder(bytes.NewReader(data))
 	err := decoder.Decode(&block)
 	if err != nil {
-		log.Panic("Failed to deserialize block:", err)
+		return nil, fmt.Errorf("Failed to deserialize block: %w", err)
 	}
-	return &block
+	return &block, nil
 }
 
 func (b *Block) Print() {

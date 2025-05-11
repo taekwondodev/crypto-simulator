@@ -13,29 +13,39 @@ import (
 	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
 )
 
-func adjustDifficulty(bc *Blockchain) int {
+func adjustDifficulty(bc *Blockchain) (int, error) {
 	// Simple difficulty adjustment - every 10 blocks
-	currentHeight := bc.CurrentHeight()
+	currentHeight, err := bc.CurrentHeight()
+	if err != nil {
+		return 0, err
+	}
+
 	if currentHeight > 0 && currentHeight%blocksToAdjust == 0 {
-		// Get current difficulty
-		currentDifficulty := bc.CurrentDifficulty()
+		currentDifficulty, err := bc.CurrentDifficulty()
+		if err != nil {
+			return 0, err
+		}
 
-		// Get timestamps for blocks at start and end of adjustment interval
-		lastBlock := bc.LastBlock()
-		tenBlocksAgo := bc.GetBlockAtHeight(currentHeight - blocksToAdjust)
+		lastBlock, err := bc.LastBlock()
+		if err != nil {
+			return 0, err
+		}
+		tenBlocksAgo, err := bc.GetBlockAtHeight(currentHeight - blocksToAdjust)
+		if err != nil {
+			return 0, err
+		}
 
-		// Calculate time taken for last 10 blocks
 		timeSpan := lastBlock.Timestamp.Sub(tenBlocksAgo.Timestamp).Seconds()
 		expectedTimeSpan := float64(targetBlockTime * blocksToAdjust)
 
 		// Adjust difficulty based on time taken
 		if timeSpan < expectedTimeSpan/2 {
-			return currentDifficulty + 1
+			return currentDifficulty + 1, nil
 		} else if timeSpan > expectedTimeSpan*2 {
-			return max(1, currentDifficulty-1) // Don't go below 1
+			return max(1, currentDifficulty-1), nil // Don't go below 1
 		}
 
-		return currentDifficulty
+		return currentDifficulty, nil
 	}
 	// Otherwise, keep current difficulty
 	return bc.CurrentDifficulty()
@@ -43,7 +53,10 @@ func adjustDifficulty(bc *Blockchain) int {
 
 func verifyInputTx(tx *transaction.Transaction, bc *Blockchain, inputSum *int) bool {
 	for _, in := range tx.Inputs {
-		utxos := bc.GetUTXOs(hex.EncodeToString(in.PubKey))
+		utxos, err := bc.GetUTXOs(hex.EncodeToString(in.PubKey))
+		if err != nil {
+			return false
+		}
 		found := false
 		for _, utxo := range utxos {
 			if bytes.Equal(utxo.TxID, in.TxID) && utxo.Index == in.OutIndex {
@@ -78,7 +91,10 @@ func verifyOutputTx(tx *transaction.Transaction, outputSum *int) {
 }
 
 func buildUTXOKey(txID []byte, index int) []byte {
-	return append(txID, byte(index))
+	if index < 0 || index > 255 {
+		index = 0
+	}
+	return append([]byte("utxo:"), append(txID, byte(index))...)
 }
 
 func reverseChain(chain []*block.Block) []*block.Block {

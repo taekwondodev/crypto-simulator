@@ -47,7 +47,7 @@ func createTransaction(fromWallet, toWallet *Wallet, amount int, utxos []*utxo.U
 
 	outputs := createOutputs(fromWallet.GetAddress(), toWallet.GetAddress(), amount, collected)
 
-	return transaction.New(inputs, outputs), nil
+	return transaction.New(inputs, outputs)
 }
 
 func selectInputs(wallet *Wallet, availableUTXOs []*utxo.UTXO, amount int) ([]utxo.TxInput, int, error) {

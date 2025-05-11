@@ -32,6 +32,7 @@ A blockchain simulator that implements the core concepts of a cryptocurrency net
 git clone https://github.com/taekwondodev/crypto-simulator.git
 
 cd crypto-simulator
+touch blockchain.db
 go mod download
 
 go build -o crypto-simulator ./cmd

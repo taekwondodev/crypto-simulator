@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/taekwondodev/crypto-simulator/pkg/block"
 	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
 )
 
@@ -74,4 +75,33 @@ func verifyOutputTx(tx *transaction.Transaction, outputSum *int) {
 	for _, out := range tx.Outputs {
 		*outputSum += out.Value
 	}
+}
+
+func buildUTXOKey(txID []byte, index int) []byte {
+	return append(txID, byte(index))
+}
+
+func reverseChain(chain []*block.Block) []*block.Block {
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+	return chain
+}
+
+func containsBlock(chain []*block.Block, blk *block.Block) bool {
+	for _, b := range chain {
+		if bytes.Equal(b.Hash, blk.Hash) {
+			return true
+		}
+	}
+	return false
+}
+
+func findForkPoint(currentChain, newChain []*block.Block) (*block.Block, error) {
+	for _, current := range currentChain {
+		if containsBlock(newChain, current) {
+			return current, nil
+		}
+	}
+	return nil, fmt.Errorf("no common ancestor found for chain reorganization")
 }

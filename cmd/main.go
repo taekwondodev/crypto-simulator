@@ -1,9 +1,11 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/taekwondodev/crypto-simulator/internal/blockchain"
@@ -13,10 +15,18 @@ import (
 )
 
 func main() {
-	// Parse command line flags
-	interactive := len(os.Args) > 1 && os.Args[1] == "interactive"
+	var interactive bool
+	var port string
 
-	// Initialize blockchain
+	flag.BoolVar(&interactive, "interactive", false, "Run in interactive mode")
+	flag.StringVar(&port, "port", ":3000", "Port to listen on (default :3000)")
+	flag.Parse()
+
+	portStr := port
+	if !strings.HasPrefix(portStr, ":") {
+		portStr = ":" + portStr
+	}
+
 	bc := blockchain.New()
 	defer bc.Close()
 
@@ -24,35 +34,21 @@ func main() {
 		panic(err)
 	}
 
-	// Initialize mempool
 	mp := mempool.New(bc)
-
-	// Define bootstrap nodes
 	bootstrapNodes := []string{"localhost:3000", "localhost:3001"}
-
-	// Create P2P node
-	portStr := ":3000" // Default port
-	if len(os.Args) > 2 {
-		portStr = os.Args[2] // Allow custom port
-	}
-
 	node := p2p.NewNode(portStr, bootstrapNodes, bc, mp)
 
-	// Set up signal handling for graceful shutdown
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start P2P node
 	go node.Start()
 
 	fmt.Printf("Node started on %s\n", portStr)
 
 	if interactive {
-		// Start interactive CLI
 		cli := cli.NewCLI(bc, mp, node)
 		go cli.Run()
 
-		// Wait for shutdown signal
 		<-signals
 		fmt.Println("\nShutting down...")
 	} else {

@@ -158,3 +158,76 @@ func getHashBlockByHeight(tx *bbolt.Tx, height int, blockData *[]byte) error {
 	*blockData = blockBucket.Get(hash)
 	return nil
 }
+
+func rollbackTransactions(bc *Blockchain, chain []*block.Block, forkPoint *block.Block, utxoBucket *bbolt.Bucket) error {
+	for _, blk := range chain {
+		if bytes.Equal(blk.Hash, forkPoint.Hash) {
+			break // Stop at fork point
+		}
+
+		for _, tx := range blk.Transactions {
+			restoreUTXOsFromInputs(bc, tx, utxoBucket)
+			removeUTXOsFromOutputs(tx, utxoBucket)
+		}
+	}
+	return nil
+}
+
+func restoreUTXOsFromInputs(bc *Blockchain, tx *transaction.Transaction, bucket *bbolt.Bucket) {
+	for _, input := range tx.Inputs {
+		origTx := bc.FindTransaction(input.TxID)
+		if origTx != nil {
+			utxo := &utxo.UTXO{
+				TxID:   input.TxID,
+				Index:  input.OutIndex,
+				Output: origTx.Outputs[input.OutIndex],
+			}
+			key := buildUTXOKey(input.TxID, input.OutIndex)
+			bucket.Put(key, utxo.Serialize())
+		}
+	}
+}
+
+func removeUTXOsFromOutputs(tx *transaction.Transaction, bucket *bbolt.Bucket) {
+	for i := range tx.Outputs {
+		key := buildUTXOKey(tx.ID, i)
+		bucket.Delete(key)
+	}
+}
+
+func applyNewChainBlocks(chain []*block.Block, forkPoint *block.Block, blockBucket, utxoBucket *bbolt.Bucket) error {
+	for _, blk := range chain {
+		if bytes.Equal(blk.Hash, forkPoint.Hash) {
+			continue // Skip the common ancestor
+		}
+
+		for _, tx := range blk.Transactions {
+			if !tx.IsCoinBase() {
+				spendUTXOsFromInputs(tx, utxoBucket)
+			}
+			addUTXOsFromOutputs(tx, utxoBucket)
+		}
+
+		blockBucket.Put(blk.Hash, blk.Serialize())
+	}
+	return nil
+}
+
+func spendUTXOsFromInputs(tx *transaction.Transaction, bucket *bbolt.Bucket) {
+	for _, input := range tx.Inputs {
+		key := buildUTXOKey(input.TxID, input.OutIndex)
+		bucket.Delete(key)
+	}
+}
+
+func addUTXOsFromOutputs(tx *transaction.Transaction, bucket *bbolt.Bucket) {
+	for i, output := range tx.Outputs {
+		utxo := &utxo.UTXO{
+			TxID:   tx.ID,
+			Index:  i,
+			Output: output,
+		}
+		key := buildUTXOKey(tx.ID, i)
+		bucket.Put(key, utxo.Serialize())
+	}
+}

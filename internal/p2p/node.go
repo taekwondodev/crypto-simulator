@@ -3,6 +3,7 @@ package p2p
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/taekwondodev/crypto-simulator/internal/blockchain"
 	"github.com/taekwondodev/crypto-simulator/internal/mempool"
+	"github.com/taekwondodev/crypto-simulator/pkg/block"
 )
 
 const (
@@ -22,12 +24,14 @@ const (
 )
 
 type Node struct {
-	Address    string
-	Peers      map[string]*Peer
-	blockchain *blockchain.Blockchain
-	mempool    *mempool.Mempool
-	mu         sync.Mutex
-	done       chan struct{}
+	Address              string
+	Peers                map[string]*Peer
+	blockchain           *blockchain.Blockchain
+	mempool              *mempool.Mempool
+	pendingInventoryReqs map[string]chan [][]byte
+	receivedBlocks       chan *block.Block
+	mu                   sync.Mutex
+	done                 chan struct{}
 }
 
 type Peer struct {
@@ -38,12 +42,15 @@ type Peer struct {
 
 func NewNode(address string, bootstrapNodes []string, bc *blockchain.Blockchain, mp *mempool.Mempool) *Node {
 	n := &Node{
-		Address:    address,
-		Peers:      make(map[string]*Peer),
-		blockchain: bc,
-		mempool:    mp,
-		done:       make(chan struct{}),
+		Address:              address,
+		Peers:                make(map[string]*Peer),
+		blockchain:           bc,
+		mempool:              mp,
+		pendingInventoryReqs: make(map[string]chan [][]byte),
+		receivedBlocks:       make(chan *block.Block, 100),
+		done:                 make(chan struct{}),
 	}
+	go n.cleanupPendingRequests()
 	n.LoadPeers()
 
 	if len(n.Peers) == 0 {
@@ -102,6 +109,22 @@ func (n *Node) Broadcast(msg *Message) {
 	}
 }
 
+func (n *Node) BroadcastChain() error {
+	chain := n.blockchain.GetChainFrom(n.blockchain.Tip)
+
+	for _, block := range chain {
+		serialize, err := block.Serialize()
+		if err != nil {
+			return err
+		}
+
+		blockMsg := NewBlockMessage(serialize)
+		n.Broadcast(blockMsg)
+	}
+
+	return nil
+}
+
 func (n *Node) Connect(addr string) {
 	// Don't connect if already connected
 	n.mu.Lock()
@@ -132,6 +155,27 @@ func (n *Node) GetPeers() []Peer {
 }
 
 /*********************************************************************************************/
+
+func (n *Node) cleanupPendingRequests() {
+	ticker := time.NewTicker(5 * time.Minute)
+	for {
+		select {
+		case <-ticker.C:
+			n.mu.Lock()
+			for key, ch := range n.pendingInventoryReqs {
+				select {
+				case ch <- nil:
+					close(ch)
+					delete(n.pendingInventoryReqs, key)
+				default:
+				}
+			}
+			n.mu.Unlock()
+		case <-n.done:
+			return
+		}
+	}
+}
 
 func (n *Node) runPeerSaver() {
 	ticker := time.NewTicker(15 * time.Minute)
@@ -305,8 +349,13 @@ func (n *Node) processMessages(conn net.Conn, peerAddr string) {
 	for {
 		msg, err := readMessage(conn, readTimeout)
 		if err != nil {
-			log.Printf("Read error from %s: %v", peerAddr, err)
-			break
+			if err == io.EOF {
+				log.Printf("Connection closed by peer %s", peerAddr)
+				break
+			} else {
+				log.Printf("Error reading from %s: %v", peerAddr, err)
+				break
+			}
 		}
 
 		n.updatePeerLastSeen(peerAddr)

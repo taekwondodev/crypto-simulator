@@ -218,6 +218,10 @@ func (cli *CLI) mineBlock() error {
 	blockMsg := p2p.NewBlockMessage(serialize)
 	cli.node.Broadcast(blockMsg)
 
+	if err := cli.node.BroadcastChain(); err != nil {
+		log.Printf("Error broadcasting chain: %v", err)
+	}
+
 	fmt.Printf("Block mined! Hash: %x, Height: %d\n", newBlock.Hash, newBlock.Height)
 	return nil
 }

@@ -103,21 +103,3 @@ func reverseChain(chain []*block.Block) []*block.Block {
 	}
 	return chain
 }
-
-func containsBlock(chain []*block.Block, blk *block.Block) bool {
-	for _, b := range chain {
-		if bytes.Equal(b.Hash, blk.Hash) {
-			return true
-		}
-	}
-	return false
-}
-
-func findForkPoint(currentChain, newChain []*block.Block) (*block.Block, error) {
-	for _, current := range currentChain {
-		if containsBlock(newChain, current) {
-			return current, nil
-		}
-	}
-	return nil, fmt.Errorf("no common ancestor found for chain reorganization")
-}

@@ -66,21 +66,26 @@ func (n *Node) handleBlock(msg *Message) error {
 		return err
 	}
 
-	lastBlock, err := n.blockchain.LastBlock()
+	b, err := n.blockchain.GetBlock(newBlock.Hash)
 	if err != nil {
 		return err
 	}
-
-	if shouldAddBlock(newBlock, lastBlock) {
-		return n.processNewBlock(newBlock, lastBlock)
+	if b != nil {
+		return nil
 	}
 
-	height, err := n.blockchain.CurrentHeight()
+	previousBlock, err := n.blockchain.GetBlock(newBlock.PreviousHash)
 	if err != nil {
 		return err
 	}
-	if isPotentialFork(newBlock, height) {
-		return n.handlePotentialFork(newBlock)
+	if previousBlock == nil {
+		getBlockMsg := NewGetBlocksMessage(newBlock.PreviousHash)
+		n.Broadcast(getBlockMsg)
+		return fmt.Errorf("missing previous block, requesting chain")
+	}
+
+	if _, err := n.blockchain.AddBlock(newBlock.Transactions); err != nil {
+		return err
 	}
 
 	return nil
@@ -106,18 +111,38 @@ func (n *Node) handleGetBlocks(msg *Message, conn net.Conn) error {
 		lastKnownHash = msg.Payload
 	}
 
-	// Get block locator (list of hashes to help peer sync)
-	locator, err := n.blockchain.GetBlockLocator(lastKnownHash)
+	blocks, locator, err := n.blockchain.GetBlockLocator(lastKnownHash)
 	if err != nil {
 		return err
 	}
-	return sendInvMessage(conn, locator)
+
+	if err := sendInvMessage(conn, locator); err != nil {
+		return err
+	}
+
+	for _, block := range blocks {
+		serializedBlock, err := block.Serialize()
+		if err != nil {
+			return err
+		}
+		if err := sendBlockMessage(conn, serializedBlock); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (n *Node) handleInventory(msg *Message, conn net.Conn) error {
 	hashes, err := deserializeHashes(msg.Payload)
 	if err != nil {
 		return err
+	}
+
+	if len(hashes) > 0 {
+		if ch, exists := n.pendingInventoryReqs[hex.EncodeToString(hashes[0])]; exists {
+			ch <- hashes
+			return nil
+		}
 	}
 
 	unknownHashes, err := n.collectUnknownBlockHashes(hashes)
@@ -171,50 +196,6 @@ func (n *Node) handleGetAddr(conn net.Conn) error {
 }
 
 /*********************************************************************************************/
-
-func shouldAddBlock(newBlock, lastBlock *block.Block) bool {
-	return bytes.Equal(newBlock.PreviousHash, lastBlock.Hash)
-}
-
-func isPotentialFork(newBlock *block.Block, currentHeight int) bool {
-	return newBlock.Height > currentHeight
-}
-
-func (n *Node) processNewBlock(newBlock, lastBlock *block.Block) error {
-	if newBlock.Validate(lastBlock) {
-		nb, err := n.blockchain.AddBlock(newBlock.Transactions)
-		if err != nil {
-			return err
-		}
-		log.Printf("Added new block: %x at height %d", nb.Hash, nb.Height)
-	} else {
-		log.Printf("Received invalid block: %x", newBlock.Hash)
-	}
-	return nil
-}
-
-func (n *Node) handlePotentialFork(newBlock *block.Block) error {
-	candidateChain, err := n.fetchCandidateChain(newBlock)
-	if err != nil {
-		log.Printf("Error fetching candidate chain: %v", err)
-		return err
-	}
-
-	if !n.blockchain.IsValidChain(candidateChain) {
-		return fmt.Errorf("Candidate chain is not valid")
-	}
-
-	if err := n.blockchain.ReorganizeChain(candidateChain); err != nil {
-		log.Printf("Chain reorganization failed: %v", err)
-		return err
-	}
-
-	tipBlock := candidateChain[len(candidateChain)-1]
-	log.Printf("Chain reorganized to new tip: %x at height %d",
-		tipBlock.Hash, tipBlock.Height)
-
-	return nil
-}
 
 func (n *Node) collectUnknownBlockHashes(hashes [][]byte) ([][]byte, error) {
 	var unknownHashes [][]byte
@@ -289,13 +270,4 @@ func serializeAddresses(addresses []string) []byte {
 	encoder := gob.NewEncoder(&buffer)
 	encoder.Encode(addresses)
 	return buffer.Bytes()
-}
-
-func (n *Node) fetchCandidateChain(startBlock *block.Block) ([]*block.Block, error) {
-	getBlocksMsg := NewGetBlocksMessage(startBlock.Hash)
-	n.Broadcast(getBlocksMsg)
-
-	// In a real implementation, this would wait for responses and build the chain
-	// For now, we'll just return the starting block as a placeholder
-	return []*block.Block{startBlock}, nil
 }

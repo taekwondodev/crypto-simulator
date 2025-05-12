@@ -12,7 +12,7 @@ import (
 )
 
 type Blockchain struct {
-	tip       []byte
+	Tip       []byte
 	Db        *bbolt.DB
 	utxoCache *lru.Cache[string, []*utxo.UTXO]
 }
@@ -60,7 +60,7 @@ func (bc *Blockchain) AddBlock(txs []*transaction.Transaction) (*block.Block, er
 		return nil, err
 	}
 
-	newBlock, err := block.New(height+1, txs, bc.tip, difficulty)
+	newBlock, err := block.New(height+1, txs, bc.Tip, difficulty)
 	if err != nil {
 		return nil, err
 	}
@@ -114,15 +114,6 @@ func (bc *Blockchain) VerifyTransaction(tx *transaction.Transaction) bool {
 	return inputSum >= outputSum
 }
 
-func (bc *Blockchain) IsValidChain(newChain []*block.Block) bool {
-	for i := 1; i < len(newChain); i++ {
-		if !newChain[i].Validate(newChain[i-1]) {
-			return false
-		}
-	}
-	return true
-}
-
 func (bc *Blockchain) GetBalance(address string) (int, error) {
 	utxos, err := bc.GetUTXOs(address)
 	if err != nil {
@@ -158,7 +149,7 @@ func (bc *Blockchain) CurrentHeight() (int, error) {
 }
 
 func (bc *Blockchain) LastBlock() (*block.Block, error) {
-	return bc.GetBlock(bc.tip)
+	return bc.GetBlock(bc.Tip)
 }
 
 func (bc *Blockchain) GetBlock(hash []byte) (*block.Block, error) {

@@ -8,34 +8,6 @@ import (
 	"go.etcd.io/bbolt"
 )
 
-func (bc *Blockchain) ReorganizeChain(newChain []*block.Block) error {
-	return bc.Db.Update(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket([]byte(blocksBucket))
-		utxoBucket := tx.Bucket([]byte(utxoBucket))
-
-		currentChain := bc.getChainFrom(bc.tip)
-		forkPoint, err := findForkPoint(currentChain, newChain)
-		if err != nil {
-			return err
-		}
-
-		if err := rollbackTransactions(bc, currentChain, forkPoint, utxoBucket); err != nil {
-			return err
-		}
-
-		if err := applyNewChainBlocks(newChain, forkPoint, bucket, utxoBucket); err != nil {
-			return err
-		}
-
-		newTip := newChain[len(newChain)-1].Hash
-		bucket.Put([]byte("l"), newTip)
-		bc.tip = newTip
-
-		bc.utxoCache.Purge()
-		return nil
-	})
-}
-
 func (bc *Blockchain) FindTransaction(id []byte) *transaction.Transaction {
 	var t *transaction.Transaction
 
@@ -67,7 +39,7 @@ func (bc *Blockchain) FindTransaction(id []byte) *transaction.Transaction {
 	return t
 }
 
-func (bc *Blockchain) getChainFrom(startHash []byte) []*block.Block {
+func (bc *Blockchain) GetChainFrom(startHash []byte) []*block.Block {
 	var chain []*block.Block
 	currentHash := startHash
 
@@ -86,32 +58,34 @@ func (bc *Blockchain) getChainFrom(startHash []byte) []*block.Block {
 	return reverseChain(chain)
 }
 
-func (bc *Blockchain) GetBlockLocator(lastKnownHash []byte) ([][]byte, error) {
-	var locator [][]byte
-	step := 1
-	currentHash := bc.tip
+func (bc *Blockchain) GetBlockLocator(lastKnownHash []byte) ([]*block.Block, [][]byte, error) {
+	var blocks []*block.Block
+	var hashes [][]byte
+	found := false
 
-	for range 10 { // Limita a 10 hop
-		locator = append(locator, currentHash)
-		block, err := bc.GetBlock(currentHash)
-		if err != nil {
-			return nil, err
-		}
-		if block == nil {
-			break
-		}
+	err := bc.Db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(blocksBucket))
+		c := b.Cursor()
 
-		for range step {
-			currentHash = block.PreviousHash
-			block, err = bc.GetBlock(currentHash)
-			if err != nil {
-				return nil, err
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if found && len(blocks) < 10 {
+				blk, err := block.Deserialize(v)
+				if err != nil {
+					return err
+				}
+				blocks = append(blocks, blk)
 			}
-			if block == nil {
-				break
+
+			if bytes.Equal(k, lastKnownHash) {
+				found = true
 			}
 		}
-		step *= 2
+		return nil
+	})
+
+	for _, blk := range blocks {
+		hashes = append(hashes, blk.Hash)
 	}
-	return locator, nil
+
+	return blocks, hashes, err
 }

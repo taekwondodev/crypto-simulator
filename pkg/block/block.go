@@ -51,33 +51,6 @@ func (b *Block) Mine() error {
 	return err
 }
 
-func (b *Block) Validate(prevBlock *Block) bool {
-	// Verify hash
-	if !bytes.Equal(b.PreviousHash, prevBlock.Hash) {
-		return false
-	}
-
-	// Verify the hash value matches the block content
-	calculatedHash, err := b.calculateHash()
-	if err != nil || !bytes.Equal(calculatedHash, b.Hash) {
-		return false
-	}
-
-	// Verify proof of work
-	target := strings.Repeat("0", b.Difficulty)
-	hashStr := hex.EncodeToString(b.Hash)
-	if !strings.HasPrefix(hashStr, target) {
-		return false
-	}
-
-	// Verify height increases by 1
-	if b.Height != prevBlock.Height+1 {
-		return false
-	}
-
-	return true
-}
-
 func (b *Block) calculateHash() ([]byte, error) {
 	tx, err := serializeTransactions(b.Transactions)
 	if err != nil {

@@ -202,7 +202,12 @@ func (cli *CLI) handleSend(parts []string) error {
 }
 
 func (cli *CLI) mineBlock() error {
-	txs, err := cli.mp.CreateCoinbaseIfNoTxs()
+	minerAddress, err := cli.handleMiningReward()
+	if err != nil {
+		return err
+	}
+
+	txs, err := cli.mp.HandleCoinbaseTxs(minerAddress, 50)
 	if err != nil {
 		return err
 	}
@@ -312,4 +317,22 @@ func (cli *CLI) handleTransactionDetails(parts []string) error {
 	fmt.Printf("Transaction Details (from %s):\n", source)
 	tx.Print("  ")
 	return nil
+}
+
+func (cli *CLI) handleMiningReward() (string, error) {
+	if len(cli.wallets) == 0 {
+		return "", fmt.Errorf("No wallets available. Create a wallet first with 'createwallet'")
+	}
+
+	fmt.Println("Available wallets:")
+	for name := range cli.wallets {
+		fmt.Println(" -", name)
+	}
+	walletName := askFor("Enter wallet name to receive mining reward: ")
+
+	wallet, exists := cli.wallets[walletName]
+	if !exists {
+		return "", fmt.Errorf("Wallet %s not found", walletName)
+	}
+	return wallet.GetAddress(), nil
 }

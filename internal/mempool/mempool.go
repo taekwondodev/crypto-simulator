@@ -108,18 +108,15 @@ func (m *Mempool) Count() int {
 	return count
 }
 
-func (m *Mempool) CreateCoinbaseIfNoTxs() ([]*transaction.Transaction, error) {
+func (m *Mempool) HandleCoinbaseTxs(minerAddress string, reward int) ([]*transaction.Transaction, error) {
 	txs := m.Flush()
 
-	if len(txs) == 0 {
-		coinbase, err := transaction.NewCoinBaseTx("MiningReward", 50)
-		if err != nil {
-			return txs, err
-		}
-		txs = []*transaction.Transaction{coinbase}
-		fmt.Println("Mining empty block with coinbase transaction only")
-	} else {
-		fmt.Printf("Mining new block with %d transactions from mempool\n", len(txs))
+	coinbase, err := transaction.NewCoinBaseTx(minerAddress, reward)
+	if err != nil {
+		return txs, err
 	}
+	txs = append([]*transaction.Transaction{coinbase}, txs...)
+
+	fmt.Printf("Mining new block with %d transactions from mempool\n", len(txs))
 	return txs, nil
 }

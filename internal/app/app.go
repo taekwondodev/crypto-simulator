@@ -12,11 +12,13 @@ import (
 	"github.com/taekwondodev/crypto-simulator/internal/config"
 	"github.com/taekwondodev/crypto-simulator/internal/mempool"
 	"github.com/taekwondodev/crypto-simulator/internal/p2p"
+	"github.com/taekwondodev/crypto-simulator/pkg/wallet"
 )
 
 type App struct {
 	config     *config.Config
 	blockchain *blockchain.Blockchain
+	wallets    map[string]*wallet.Wallet
 	mempool    *mempool.Mempool
 	node       *p2p.Node
 	signals    chan os.Signal
@@ -33,14 +35,20 @@ func New(config *config.Config) *App {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
-	return &App{
+	a := &App{
 		config:     config,
 		blockchain: bc,
+		wallets:    make(map[string]*wallet.Wallet),
 		mempool:    mp,
 		node:       node,
 		signals:    signals,
 		stopMining: make(chan struct{}),
 	}
+
+	if err := a.LoadWallets(); err != nil {
+		fmt.Printf("Error loading wallets: %v\n", err)
+	}
+	return a
 }
 
 func (a *App) Start() {
@@ -97,7 +105,11 @@ func (a *App) automaticMining() {
 }
 
 func (a *App) mineNewBlock() error {
-	txs, err := a.mempool.CreateCoinbaseIfNoTxs()
+	minerAddress, err := a.handleMiningReward()
+	if err != nil {
+		return err
+	}
+	txs, err := a.mempool.HandleCoinbaseTxs(minerAddress, 50)
 	if err != nil {
 		return err
 	}
@@ -117,4 +129,18 @@ func (a *App) mineNewBlock() error {
 		newBlock.Hash, newBlock.Height, len(newBlock.Transactions))
 
 	return nil
+}
+
+func (a *App) handleMiningReward() (string, error) {
+	if len(a.wallets) == 0 {
+		return "", fmt.Errorf("No wallets available. Create a wallet first with 'createwallet'")
+	}
+	var firstWallet *wallet.Wallet
+
+	for _, wallet := range a.wallets {
+		firstWallet = wallet
+		break
+	}
+
+	return firstWallet.GetAddress(), nil
 }

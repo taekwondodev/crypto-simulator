@@ -15,7 +15,6 @@ type Transaction struct {
 	Outputs []utxo.TxOutput
 }
 
-// First transaction in the blockchain, called the coinbase transaction
 func NewCoinBaseTx(to string, value int) (*Transaction, error) {
 	tx := &Transaction{
 		Outputs: []utxo.TxOutput{

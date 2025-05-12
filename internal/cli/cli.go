@@ -202,14 +202,10 @@ func (cli *CLI) handleSend(parts []string) error {
 }
 
 func (cli *CLI) mineBlock() error {
-	// Get transactions from mempool
-	txs := cli.mp.Flush()
-
-	if len(txs) == 0 {
-		return fmt.Errorf("No transactions in mempool to mine")
+	txs, err := cli.mp.CreateCoinbaseIfNoTxs()
+	if err != nil {
+		return err
 	}
-
-	fmt.Printf("Mining new block with %d transactions...\n", len(txs))
 
 	newBlock, err := cli.bc.AddBlock(txs)
 	if err != nil {

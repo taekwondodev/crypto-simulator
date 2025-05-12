@@ -12,7 +12,6 @@ import (
 	"github.com/taekwondodev/crypto-simulator/internal/config"
 	"github.com/taekwondodev/crypto-simulator/internal/mempool"
 	"github.com/taekwondodev/crypto-simulator/internal/p2p"
-	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
 )
 
 type App struct {
@@ -98,18 +97,9 @@ func (a *App) automaticMining() {
 }
 
 func (a *App) mineNewBlock() error {
-	txs := a.mempool.Flush()
-
-	// If mempool is empty, create a coinbase transaction
-	if len(txs) == 0 {
-		coinbase, err := transaction.NewCoinBaseTx("MiningReward", 50)
-		if err != nil {
-			return err
-		}
-		txs = []*transaction.Transaction{coinbase}
-		fmt.Println("Mining empty block with coinbase transaction only")
-	} else {
-		fmt.Printf("Mining new block with %d transactions from mempool\n", len(txs))
+	txs, err := a.mempool.CreateCoinbaseIfNoTxs()
+	if err != nil {
+		return err
 	}
 
 	newBlock, err := a.blockchain.AddBlock(txs)

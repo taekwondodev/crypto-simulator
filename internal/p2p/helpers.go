@@ -1,6 +1,9 @@
 package p2p
 
 import (
+	"bytes"
+	"encoding/binary"
+	"io"
 	"log"
 	"net"
 	"time"
@@ -22,14 +25,31 @@ func writeData(conn net.Conn, data []byte) error {
 
 func readMessage(conn net.Conn, timeout time.Duration) (*Message, error) {
 	conn.SetReadDeadline(time.Now().Add(timeout))
-	buf := make([]byte, 4096)
 
-	nBytes, err := conn.Read(buf)
+	header := make([]byte, 13)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return nil, err
+	}
+
+	msg, err := readHeader(bytes.NewReader(header))
 	if err != nil {
 		return nil, err
 	}
 
-	return DeserializeMessage(buf[:nBytes])
+	lenBuf := make([]byte, 4)
+	if _, err := io.ReadFull(conn, lenBuf); err != nil {
+		return nil, err
+	}
+
+	payloadLen := binary.LittleEndian.Uint32(lenBuf)
+	if payloadLen > 0 {
+		msg.Payload = make([]byte, payloadLen)
+		if _, err := io.ReadFull(conn, msg.Payload); err != nil {
+			return nil, err
+		}
+	}
+
+	return msg, nil
 }
 
 func sendVersionMessage(conn net.Conn, address string) error {

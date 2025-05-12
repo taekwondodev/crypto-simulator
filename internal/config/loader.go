@@ -14,6 +14,7 @@ func LoadFromFlags() *Config {
 	flag.StringVar(&cfg.Port, "port", cfg.Port, "Port to listen on")
 	flag.IntVar(&miningInterval, "mining-interval", int(cfg.MiningInterval.Seconds()),
 		"Seconds between mining attempts in non-interactive mode")
+	flag.StringVar(&cfg.DatabasePath, "dbpath", cfg.DatabasePath, "Path to blockchain db file")
 
 	flag.Parse()
 

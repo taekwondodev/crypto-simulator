@@ -117,7 +117,7 @@ func (n *Node) Connect(addr string) {
 		return
 	}
 
-	go n.handleConnection(conn)
+	go n.handleConnectionClient(conn)
 }
 
 func (n *Node) GetPeers() []Peer {
@@ -169,30 +169,41 @@ func (n *Node) acceptConnections(listener net.Listener) {
 
 		go func() {
 			defer func() { <-sem }()
-			n.handleConnection(conn)
+			n.handleConnectionServer(conn)
 		}()
 	}
 }
 
-func (n *Node) handleConnection(conn net.Conn) {
+func (n *Node) handleConnectionClient(conn net.Conn) {
 	defer conn.Close()
 
-	conn.SetReadDeadline(time.Now().Add(readTimeout))
-
-	peerAddr := conn.RemoteAddr().String()
-
-	pingDone := n.setupPingKeepAlive(conn)
-	defer close(pingDone)
-
-	if err := n.performHandshake(conn); err != nil {
+	if err := n.performHandshakeClient(conn); err != nil {
 		log.Printf("Handshake failed: %v", err)
 		return
 	}
 
+	n.setupPeerSession(conn)
+}
+
+func (n *Node) handleConnectionServer(conn net.Conn) {
+	defer conn.Close()
+
+	if err := n.performHandshakeServer(conn); err != nil {
+		log.Printf("Handshake failed: %v", err)
+		return
+	}
+
+	n.setupPeerSession(conn)
+}
+
+func (n *Node) setupPeerSession(conn net.Conn) {
+	peerAddr := conn.RemoteAddr().String()
+	pingDone := n.setupPingKeepAlive(conn)
+	defer close(pingDone)
+
 	n.registerPeer(conn, peerAddr)
-
+	conn.SetReadDeadline(time.Now().Add(readTimeout))
 	n.processMessages(conn, peerAddr)
-
 	n.removePeer(peerAddr)
 }
 
@@ -232,21 +243,53 @@ func (n *Node) registerPeer(conn net.Conn, addr string) {
 	log.Printf("Peer registered: %s", addr)
 }
 
-func (n *Node) performHandshake(conn net.Conn) error {
-	if err := sendVersionMessage(conn, n.Address); err != nil {
-		return err
-	}
-
-	msg, err := readMessage(conn, 10*time.Second)
+func (n *Node) performHandshakeServer(conn net.Conn) error {
+	msg, err := readMessage(conn, connectTimeout)
 	if err != nil {
 		return err
 	}
 
 	if msg.Type != MsgVersion {
-		return errors.New("expected version message during handshake")
+		return errors.New("unexpected message type during handshake: " + fmt.Sprintf("%d", msg.Type))
 	}
 
-	return sendVerAckMessage(conn)
+	if err := sendVerAckMessage(conn); err != nil {
+		return err
+	}
+
+	msg, err = readMessage(conn, connectTimeout)
+	if err != nil {
+		return err
+	}
+
+	if msg.Type != MsgVerAck {
+		return errors.New("unexpected message type during handshake: " + fmt.Sprintf("%d", msg.Type))
+	}
+
+	log.Printf("Handshake successful with %s", conn.RemoteAddr().String())
+	return nil
+}
+
+func (n *Node) performHandshakeClient(conn net.Conn) error {
+	if err := sendVersionMessage(conn, n.Address); err != nil {
+		return err
+	}
+
+	msg, err := readMessage(conn, connectTimeout)
+	if err != nil {
+		return err
+	}
+
+	if msg.Type != MsgVerAck {
+		return fmt.Errorf("Unexpected message type during handshake: %d", msg.Type)
+	}
+
+	if err := sendVerAckMessage(conn); err != nil {
+		return err
+	}
+
+	log.Printf("Handshake successful with %s", conn.RemoteAddr().String())
+	return nil
 }
 
 func (n *Node) updatePeerLastSeen(addr string) {

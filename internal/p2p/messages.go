@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/gob"
-	"errors"
 	"time"
 )
 
@@ -118,23 +117,15 @@ func NewAddrMessage(addresses []byte) *Message {
 
 func (m *Message) Serialize() ([]byte, error) {
 	var buffer bytes.Buffer
-	writeHeader(buffer, m)
-	writePayload(buffer, m)
-	return buffer.Bytes(), nil
-}
 
-func DeserializeMessage(data []byte) (*Message, error) {
-	if len(data) < 13 { // Minimum size: version(4) + type(1) + timestamp(8)
-		return nil, errors.New("message data too short")
+	if err := writeHeader(&buffer, m); err != nil {
+		return nil, err
 	}
 
-	buffer := bytes.NewReader(data)
-	var msg Message
-
-	readHeader(buffer, msg)
-	readPayload(buffer, &msg)
-
-	return &msg, nil
+	if err := writePayload(&buffer, m); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }
 
 func serializeHashes(hashes [][]byte) []byte {
@@ -169,55 +160,44 @@ func deserializeHashes(data []byte) ([][]byte, error) {
 	return hashes, nil
 }
 
-func writeHeader(buffer bytes.Buffer, m *Message) error {
-	if err := binary.Write(&buffer, binary.LittleEndian, m.Version); err != nil {
+func writeHeader(buffer *bytes.Buffer, m *Message) error {
+	if err := binary.Write(buffer, binary.LittleEndian, m.Version); err != nil {
 		return err
 	}
 
-	if err := binary.Write(&buffer, binary.LittleEndian, m.Type); err != nil {
+	if err := binary.Write(buffer, binary.LittleEndian, m.Type); err != nil {
 		return err
 	}
 
-	return binary.Write(&buffer, binary.LittleEndian, m.Timestamp)
+	return binary.Write(buffer, binary.LittleEndian, m.Timestamp)
 }
 
-func readHeader(buffer *bytes.Reader, msg Message) error {
+func readHeader(buffer *bytes.Reader) (*Message, error) {
+	msg := &Message{}
+
 	if err := binary.Read(buffer, binary.LittleEndian, &msg.Version); err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := binary.Read(buffer, binary.LittleEndian, &msg.Type); err != nil {
-		return err
+		return nil, err
 	}
 
-	return binary.Read(buffer, binary.LittleEndian, &msg.Timestamp)
+	if err := binary.Read(buffer, binary.LittleEndian, &msg.Timestamp); err != nil {
+		return nil, err
+	}
+
+	return msg, nil
 }
 
-func writePayload(buffer bytes.Buffer, m *Message) error {
+func writePayload(buffer *bytes.Buffer, m *Message) error {
 	payloadLen := uint32(len(m.Payload))
-	if err := binary.Write(&buffer, binary.LittleEndian, payloadLen); err != nil {
+	if err := binary.Write(buffer, binary.LittleEndian, payloadLen); err != nil {
 		return err
 	}
 
 	if payloadLen > 0 {
 		if _, err := buffer.Write(m.Payload); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func readPayload(buffer *bytes.Reader, msg *Message) error {
-	var payloadLen uint32
-	if err := binary.Read(buffer, binary.LittleEndian, &payloadLen); err != nil {
-		return err
-	}
-
-	// Read payload if exists
-	if payloadLen > 0 {
-		msg.Payload = make([]byte, payloadLen)
-		if _, err := buffer.Read(msg.Payload); err != nil {
 			return err
 		}
 	}

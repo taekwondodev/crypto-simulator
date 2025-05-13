@@ -94,11 +94,8 @@ func (n *Node) Broadcast(msg *Message) {
 	defer n.mu.Unlock()
 
 	for addr, peer := range n.Peers {
-		if err := writeMessage(peer.Connection, msg); err != nil {
-			logError(fmt.Sprintf("Failed to broadcast to %s", addr), err)
+		if err := writeMessage(peer.Connection, msg, n.Address); err != nil {
 			n.removePeerLocked(addr)
-		} else {
-			logMessageSent(msg.Type, addr)
 		}
 	}
 }
@@ -219,7 +216,7 @@ func (n *Node) setupPingKeepAlive(conn net.Conn) chan struct{} {
 		for {
 			select {
 			case <-pingTicker.C:
-				if err := sendPingMessage(conn); err != nil {
+				if err := sendPingMessage(conn, n.Address); err != nil {
 					log.Printf("Ping failed: %v", err)
 					return
 				}
@@ -255,7 +252,7 @@ func (n *Node) performHandshakeServer(conn net.Conn) error {
 		return errors.New("unexpected message type during handshake: " + fmt.Sprintf("%d", msg.Type))
 	}
 
-	if err := sendVerAckMessage(conn); err != nil {
+	if err := sendVerAckMessage(conn, n.Address); err != nil {
 		return err
 	}
 
@@ -286,7 +283,7 @@ func (n *Node) performHandshakeClient(conn net.Conn) error {
 		return fmt.Errorf("Unexpected message type during handshake: %d", msg.Type)
 	}
 
-	if err := sendVerAckMessage(conn); err != nil {
+	if err := sendVerAckMessage(conn, n.Address); err != nil {
 		return err
 	}
 

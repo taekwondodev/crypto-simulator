@@ -47,7 +47,7 @@ func (n *Node) handleVerAck() error {
 }
 
 func (n *Node) handlePing(conn net.Conn) error {
-	return sendPongMessage(conn)
+	return sendPongMessage(conn, n.Address)
 }
 
 func (n *Node) handlePong() error {
@@ -117,7 +117,7 @@ func (n *Node) handleGetBlocks(msg *Message, conn net.Conn) error {
 		return err
 	}
 
-	return sendInvMessage(conn, nextBlocks)
+	return sendInvMessage(conn, nextBlocks, n.Address)
 }
 
 func (n *Node) handleInventory(msg *Message, conn net.Conn) error {
@@ -132,7 +132,7 @@ func (n *Node) handleInventory(msg *Message, conn net.Conn) error {
 	}
 
 	if len(unknownHashes) > 0 {
-		return sendGetDataMessage(conn, unknownHashes)
+		return sendGetDataMessage(conn, unknownHashes, n.Address)
 	}
 
 	return nil
@@ -159,7 +159,7 @@ func (n *Node) handleSync(conn net.Conn) error {
 	if err != nil {
 		return err
 	}
-	return sendGetBlocksMessage(conn, locator)
+	return sendGetBlocksMessage(conn, locator, n.Address)
 }
 
 /*********************************************************************************************/
@@ -191,7 +191,7 @@ func (n *Node) sendRequestedData(hash []byte, conn net.Conn) error {
 		if err != nil {
 			return err
 		}
-		return sendBlockMessage(conn, serialize)
+		return sendBlockMessage(conn, serialize, n.Address)
 	}
 
 	txID := hex.EncodeToString(hash)
@@ -202,7 +202,7 @@ func (n *Node) sendRequestedData(hash []byte, conn net.Conn) error {
 		if err != nil {
 			return err
 		}
-		return sendTxMessage(conn, serialize)
+		return sendTxMessage(conn, serialize, n.Address)
 	}
 
 	// If not in mempool, check if it's a transaction in the blockchain
@@ -213,7 +213,7 @@ func (n *Node) sendRequestedData(hash []byte, conn net.Conn) error {
 		if err != nil {
 			return err
 		}
-		return sendTxMessage(conn, serialize)
+		return sendTxMessage(conn, serialize, n.Address)
 	}
 
 	log.Printf("Requested data not found for hash: %x", hash)

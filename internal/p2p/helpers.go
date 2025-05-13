@@ -3,18 +3,26 @@ package p2p
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"time"
 )
 
-func writeMessage(conn net.Conn, msg *Message) error {
+func writeMessage(conn net.Conn, msg *Message, address string) error {
 	data, err := msg.Serialize()
 	if err != nil {
 		return err
 	}
-	return writeData(conn, data)
+
+	if err := writeData(conn, data); err != nil {
+		logError(fmt.Sprintf("Failed to send to %s", address), err)
+		return err
+	} else {
+		logMessageSent(msg.Type, address)
+		return nil
+	}
 }
 
 func writeData(conn net.Conn, data []byte) error {
@@ -54,47 +62,47 @@ func readMessage(conn net.Conn, timeout time.Duration) (*Message, error) {
 
 func sendVersionMessage(conn net.Conn, address string) error {
 	msg := NewVersionMessage(address)
-	return writeMessage(conn, msg)
+	return writeMessage(conn, msg, address)
 }
 
-func sendVerAckMessage(conn net.Conn) error {
+func sendVerAckMessage(conn net.Conn, address string) error {
 	msg := NewVerAckMessage()
-	return writeMessage(conn, msg)
+	return writeMessage(conn, msg, address)
 }
 
-func sendPingMessage(conn net.Conn) error {
+func sendPingMessage(conn net.Conn, address string) error {
 	msg := NewPingMessage()
-	return writeMessage(conn, msg)
+	return writeMessage(conn, msg, address)
 }
 
-func sendPongMessage(conn net.Conn) error {
+func sendPongMessage(conn net.Conn, address string) error {
 	msg := NewPongMessage()
-	return writeMessage(conn, msg)
+	return writeMessage(conn, msg, address)
 }
 
-func sendTxMessage(conn net.Conn, txData []byte) error {
+func sendTxMessage(conn net.Conn, txData []byte, address string) error {
 	msg := NewTxMessage(txData)
-	return writeMessage(conn, msg)
+	return writeMessage(conn, msg, address)
 }
 
-func sendBlockMessage(conn net.Conn, blockData []byte) error {
+func sendBlockMessage(conn net.Conn, blockData []byte, address string) error {
 	msg := NewBlockMessage(blockData)
-	return writeMessage(conn, msg)
+	return writeMessage(conn, msg, address)
 }
 
-func sendInvMessage(conn net.Conn, hashes [][]byte) error {
+func sendInvMessage(conn net.Conn, hashes [][]byte, address string) error {
 	msg := NewInvMessage(hashes)
-	return writeMessage(conn, msg)
+	return writeMessage(conn, msg, address)
 }
 
-func sendGetBlocksMessage(conn net.Conn, locator [][]byte) error {
+func sendGetBlocksMessage(conn net.Conn, locator [][]byte, address string) error {
 	msg := NewGetBlocksMessage(locator)
-	return writeMessage(conn, msg)
+	return writeMessage(conn, msg, address)
 }
 
-func sendGetDataMessage(conn net.Conn, hashes [][]byte) error {
+func sendGetDataMessage(conn net.Conn, hashes [][]byte, address string) error {
 	msg := NewGetDataMessage(hashes)
-	return writeMessage(conn, msg)
+	return writeMessage(conn, msg, address)
 }
 
 func logMessageSent(msgType uint8, addr string) {

@@ -23,6 +23,20 @@ type Block struct {
 	Hash         []byte
 }
 
+func Genesis(height int, transactions []*transaction.Transaction, prevHash []byte, difficulty int, timestamp int64) (*Block, error) {
+	var err error
+	block := &Block{
+		Height:       height,
+		Timestamp:    time.Unix(timestamp, 0),
+		PreviousHash: prevHash,
+		Transactions: transactions,
+		Nonce:        0,
+		Difficulty:   difficulty,
+	}
+	block.Hash, err = block.calculateHash()
+	return block, err
+}
+
 func New(height int, transactions []*transaction.Transaction, prevHash []byte, difficulty int) (*Block, error) {
 	var err error
 	block := &Block{

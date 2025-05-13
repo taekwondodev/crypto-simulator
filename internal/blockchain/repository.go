@@ -191,7 +191,7 @@ func getHashBlockByHeight(tx *bbolt.Tx, height int, blockData *[]byte) error {
 	return nil
 }
 
-func getBlockByPreviousHash(tx *bbolt.Tx, prevHash []byte, foundBlock *block.Block) error {
+func getBlockByPreviousHash(tx *bbolt.Tx, prevHash []byte, foundBlock **block.Block) error {
 	b := tx.Bucket([]byte(blocksBucket))
 	c := b.Cursor()
 
@@ -204,8 +204,8 @@ func getBlockByPreviousHash(tx *bbolt.Tx, prevHash []byte, foundBlock *block.Blo
 			return err
 		}
 		if bytes.Equal(blk.PreviousHash, prevHash) {
-			foundBlock = blk
-			break
+			*foundBlock = blk
+			return nil
 		}
 	}
 	return nil

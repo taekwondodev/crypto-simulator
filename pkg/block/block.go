@@ -65,30 +65,30 @@ func (b *Block) Mine() error {
 	return err
 }
 
-func (b *Block) IsValid(prevBlock *Block) bool {
+func (b *Block) IsValid(prevBlock *Block) error {
 	if !bytes.Equal(b.PreviousHash, prevBlock.Hash) {
-		return false
+		return fmt.Errorf("Previous hash does not match")
 	}
 
 	calculatedHash, err := b.calculateHash()
 	if err != nil {
-		return false
+		return err
 	}
 	if !bytes.Equal(calculatedHash, b.Hash) {
-		return false
+		return fmt.Errorf("Hash does not match, block compromised")
 	}
 
 	target := strings.Repeat("0", b.Difficulty)
 	hashStr := hex.EncodeToString(b.Hash)
 	if !strings.HasPrefix(hashStr, target) {
-		return false
+		return fmt.Errorf("Hash does not meet difficulty requirement")
 	}
 
 	if b.Height != prevBlock.Height+1 {
-		return false
+		return fmt.Errorf("Block height is not sequential")
 	}
 
-	return true
+	return nil
 }
 
 func (b *Block) calculateHash() ([]byte, error) {
@@ -96,9 +96,10 @@ func (b *Block) calculateHash() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	timestampBytes := []byte(strconv.FormatInt(b.Timestamp.Unix(), 10))
 	data := bytes.Join(
 		[][]byte{
-			[]byte(b.Timestamp.String()),
+			timestampBytes,
 			b.PreviousHash,
 			tx,
 			[]byte(strconv.Itoa(b.Nonce)),

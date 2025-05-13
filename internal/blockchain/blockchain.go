@@ -75,9 +75,9 @@ func (bc *Blockchain) CreateBlock(txs []*transaction.Transaction) (*block.Block,
 }
 
 func (bc *Blockchain) AddBlock(newBlock *block.Block) error {
-	previousBlock, _ := bc.GetBlock(bc.tip)
-	if !newBlock.IsValid(previousBlock) {
-		return fmt.Errorf("invalid block: %x", newBlock.Hash)
+	previousBlock, _ := bc.GetBlock(newBlock.PreviousHash)
+	if err := newBlock.IsValid(previousBlock); err != nil {
+		return err
 	}
 
 	err := bc.Db.Update(func(tx *bbolt.Tx) error {
@@ -199,7 +199,7 @@ func (bc *Blockchain) GetBlockByPreviousHash(prevHash []byte) (*block.Block, err
 	var foundBlock *block.Block
 
 	err := bc.Db.View(func(tx *bbolt.Tx) error {
-		return getBlockByPreviousHash(tx, prevHash, foundBlock)
+		return getBlockByPreviousHash(tx, prevHash, &foundBlock)
 	})
 
 	if err != nil {

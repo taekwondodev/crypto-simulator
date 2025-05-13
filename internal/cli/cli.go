@@ -62,7 +62,7 @@ func (cli *CLI) Run() {
 		command := parts[0]
 
 		if command == "exit" || command == "quit" {
-			return
+			break
 		}
 
 		handler, exists := cli.commandHandlers[command]
@@ -216,11 +216,11 @@ func (cli *CLI) mineBlock() error {
 	if err := cli.bc.AddBlock(newBlock); err != nil {
 		return err
 	}
+	fmt.Printf("Block mined! Hash: %x, Height: %d\n", newBlock.Hash, newBlock.Height)
 
 	invMsg := p2p.NewInvMessage([][]byte{newBlock.Hash})
 	cli.node.Broadcast(invMsg)
 
-	fmt.Printf("Block mined! Hash: %x, Height: %d\n", newBlock.Hash, newBlock.Height)
 	return nil
 }
 

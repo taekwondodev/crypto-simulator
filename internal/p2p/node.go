@@ -252,6 +252,12 @@ func (n *Node) performHandshakeServer(conn net.Conn) error {
 		return errors.New("unexpected message type during handshake: " + fmt.Sprintf("%d", msg.Type))
 	}
 
+	if err := n.handleVersion(msg); err != nil {
+		conn.Close()
+		n.removePeer(conn.RemoteAddr().String())
+		return err
+	}
+
 	if err := sendVerAckMessage(conn, n.Address); err != nil {
 		return err
 	}
@@ -270,7 +276,11 @@ func (n *Node) performHandshakeServer(conn net.Conn) error {
 }
 
 func (n *Node) performHandshakeClient(conn net.Conn) error {
-	if err := sendVersionMessage(conn, n.Address); err != nil {
+	genesis, err := n.blockchain.GetBlockAtHeight(0)
+	if err != nil {
+		return err
+	}
+	if err := sendVersionMessage(conn, [][]byte{genesis.Hash}, n.Address); err != nil {
 		return err
 	}
 

@@ -60,8 +60,8 @@ func readMessage(conn net.Conn, timeout time.Duration) (*Message, error) {
 	return msg, nil
 }
 
-func sendVersionMessage(conn net.Conn, address string) error {
-	msg := NewVersionMessage(address)
+func sendVersionMessage(conn net.Conn, genesis [][]byte, address string) error {
+	msg := NewVersionMessage(genesis)
 	return writeMessage(conn, msg, address)
 }
 

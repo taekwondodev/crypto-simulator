@@ -26,12 +26,12 @@ type Message struct {
 	Payload   []byte
 }
 
-func NewVersionMessage(senderAddr string) *Message {
+func NewVersionMessage(genesis [][]byte) *Message {
 	return &Message{
 		Version:   0x01,
 		Type:      MsgVersion,
 		Timestamp: time.Now().Unix(),
-		Payload:   []byte(senderAddr),
+		Payload:   serializeHashes(genesis),
 	}
 }
 

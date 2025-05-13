@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"log"
@@ -12,8 +13,6 @@ import (
 
 func (n *Node) handleMessage(msg *Message, conn net.Conn) error {
 	handlers := map[uint8]func(*Message, net.Conn) error{
-		MsgVersion:   func(m *Message, c net.Conn) error { return n.handleVersion(m) },
-		MsgVerAck:    func(m *Message, c net.Conn) error { return n.handleVerAck() },
 		MsgPing:      func(m *Message, c net.Conn) error { return n.handlePing(c) },
 		MsgPong:      func(m *Message, c net.Conn) error { return n.handlePong() },
 		MsgTx:        func(m *Message, c net.Conn) error { return n.handleTransaction(m) },
@@ -32,17 +31,23 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) error {
 }
 
 func (n *Node) handleVersion(msg *Message) error {
-	peerAddr := string(msg.Payload)
-	if peerAddr != "" {
-		logMessageReceived(msg.Type, peerAddr)
+	hashes, err := deserializeHashes(msg.Payload)
+	if err != nil {
+		return err
+	}
+	var genesisFromPeer []byte
+	for _, hash := range hashes {
+		genesisFromPeer = hash
+		break
 	}
 
-	// We've already responded with verack in the handshake
-	return nil
-}
-
-func (n *Node) handleVerAck() error {
-	// Handshake complete, nothing to do
+	actualGenesis, err := n.blockchain.GetBlockAtHeight(0)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(genesisFromPeer, actualGenesis.Hash) {
+		return errors.New("Peer has a different genesis block. Cannot synchronize.")
+	}
 	return nil
 }
 

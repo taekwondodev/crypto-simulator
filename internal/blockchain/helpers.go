@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/taekwondodev/crypto-simulator/pkg/block"
 	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
 )
 
@@ -95,11 +94,4 @@ func buildUTXOKey(txID []byte, index int) []byte {
 		index = 0
 	}
 	return append([]byte("utxo:"), append(txID, byte(index))...)
-}
-
-func reverseChain(chain []*block.Block) []*block.Block {
-	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
-		chain[i], chain[j] = chain[j], chain[i]
-	}
-	return chain
 }

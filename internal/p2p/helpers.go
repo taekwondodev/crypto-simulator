@@ -97,11 +97,6 @@ func sendGetDataMessage(conn net.Conn, hashes [][]byte) error {
 	return writeMessage(conn, msg)
 }
 
-func sendAddrMessage(conn net.Conn, buffer []byte) error {
-	msg := NewAddrMessage(buffer)
-	return writeMessage(conn, msg)
-}
-
 func logMessageSent(msgType uint8, addr string) {
 	log.Printf("Sent %s message to %s", messageTypeName(msgType), addr)
 }
@@ -120,10 +115,6 @@ func messageTypeName(msgType uint8) string {
 		return "VERSION"
 	case MsgVerAck:
 		return "VERACK"
-	case MsgAddr:
-		return "ADDR"
-	case MsgGetAddr:
-		return "GETADDR"
 	case MsgInv:
 		return "INV"
 	case MsgGetData:

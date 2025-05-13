@@ -1,8 +1,6 @@
 package p2p
 
 import (
-	"bytes"
-	"encoding/gob"
 	"encoding/hex"
 	"errors"
 	"log"
@@ -23,8 +21,6 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) error {
 		MsgGetBlocks: func(m *Message, c net.Conn) error { return n.handleGetBlocks(m, c) },
 		MsgInv:       func(m *Message, c net.Conn) error { return n.handleInventory(m, c) },
 		MsgGetData:   func(m *Message, c net.Conn) error { return n.handleGetData(m, c) },
-		MsgAddr:      func(m *Message, c net.Conn) error { return n.handleAddress(m) },
-		MsgGetAddr:   func(m *Message, c net.Conn) error { return n.handleGetAddr(c) },
 	}
 
 	handler, exists := handlers[msg.Type]
@@ -158,28 +154,6 @@ func (n *Node) handleGetData(msg *Message, conn net.Conn) error {
 	return nil
 }
 
-func (n *Node) handleAddress(msg *Message) error {
-	var addresses []string
-	decoder := gob.NewDecoder(bytes.NewReader(msg.Payload))
-	if err := decoder.Decode(&addresses); err != nil {
-		return err
-	}
-
-	for _, addr := range addresses {
-		if addr != n.Address {
-			go n.Connect(addr)
-		}
-	}
-
-	return nil
-}
-
-func (n *Node) handleGetAddr(conn net.Conn) error {
-	addresses := n.collectPeerAddresses()
-	buffer := serializeAddresses(addresses)
-	return sendAddrMessage(conn, buffer)
-}
-
 func (n *Node) handleSync(conn net.Conn) error {
 	locator, err := n.blockchain.GetBlockLocator(nil)
 	if err != nil {
@@ -244,23 +218,4 @@ func (n *Node) sendRequestedData(hash []byte, conn net.Conn) error {
 
 	log.Printf("Requested data not found for hash: %x", hash)
 	return nil
-}
-
-func (n *Node) collectPeerAddresses() []string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	addresses := make([]string, 0, len(n.Peers))
-	for addr := range n.Peers {
-		addresses = append(addresses, addr)
-	}
-
-	return addresses
-}
-
-func serializeAddresses(addresses []string) []byte {
-	var buffer bytes.Buffer
-	encoder := gob.NewEncoder(&buffer)
-	encoder.Encode(addresses)
-	return buffer.Bytes()
 }

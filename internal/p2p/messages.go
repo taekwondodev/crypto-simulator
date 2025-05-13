@@ -10,13 +10,11 @@ import (
 const (
 	MsgVersion   = 0x01
 	MsgVerAck    = 0x02
-	MsgAddr      = 0x03
-	MsgGetAddr   = 0x04
-	MsgInv       = 0x05
-	MsgGetData   = 0x06
-	MsgGetBlocks = 0x07
-	MsgBlock     = 0x08
-	MsgTx        = 0x09
+	MsgInv       = 0x03
+	MsgGetData   = 0x04
+	MsgGetBlocks = 0x05
+	MsgBlock     = 0x06
+	MsgTx        = 0x07
 	MsgPing      = 0x0A
 	MsgPong      = 0x0B
 )
@@ -103,15 +101,6 @@ func NewGetDataMessage(hashes [][]byte) *Message {
 		Type:      MsgGetData,
 		Timestamp: time.Now().Unix(),
 		Payload:   serializeHashes(hashes),
-	}
-}
-
-func NewAddrMessage(addresses []byte) *Message {
-	return &Message{
-		Version:   0x01,
-		Type:      MsgAddr,
-		Timestamp: time.Now().Unix(),
-		Payload:   addresses,
 	}
 }
 

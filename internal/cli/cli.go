@@ -18,6 +18,7 @@ type CLI struct {
 	node            *p2p.Node
 	wallets         map[string]*Wallet
 	commandHandlers map[string]func([]string) error
+	done            chan struct{}
 }
 
 func NewCLI(bc *blockchain.Blockchain, mp *mempool.Mempool, node *p2p.Node) *CLI {
@@ -26,6 +27,7 @@ func NewCLI(bc *blockchain.Blockchain, mp *mempool.Mempool, node *p2p.Node) *CLI
 		mp:      mp,
 		node:    node,
 		wallets: make(map[string]*Wallet),
+		done:    make(chan struct{}),
 	}
 
 	cli.commandHandlers = map[string]func([]string) error{
@@ -48,6 +50,9 @@ func NewCLI(bc *blockchain.Blockchain, mp *mempool.Mempool, node *p2p.Node) *CLI
 	return cli
 }
 
+func (cli *CLI) Done() <-chan struct{} {
+	return cli.done
+}
 func (cli *CLI) Run() {
 	fmt.Println("Blockchain CLI")
 	fmt.Println("Type 'help' for commands")
@@ -62,6 +67,7 @@ func (cli *CLI) Run() {
 		command := parts[0]
 
 		if command == "exit" || command == "quit" {
+			close(cli.done)
 			break
 		}
 

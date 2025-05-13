@@ -71,7 +71,10 @@ func (a *App) startInteractiveMode() {
 	cliHandler := cli.NewCLI(a.blockchain, a.mempool, a.node)
 	go cliHandler.Run()
 
-	<-a.signals
+	select {
+	case <-cliHandler.Done():
+	case <-a.signals:
+	}
 	fmt.Println("\nShutting down...")
 }
 

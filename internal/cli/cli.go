@@ -188,12 +188,8 @@ func (cli *CLI) handleSend(parts []string) error {
 	}
 
 	cli.mp.Add(tx)
-	serialize, err := tx.Serialize()
-	if err != nil {
-		return err
-	}
-	txMsg := p2p.NewTxMessage(serialize)
-	cli.node.Broadcast(txMsg)
+	invMsg := p2p.NewInvMessage([][]byte{tx.ID})
+	cli.node.Broadcast(invMsg)
 
 	fmt.Printf("Transaction created: %x\n", tx.ID)
 	fmt.Printf("Sent %d coins from %s to %s\n", amount, fromName, toName)
@@ -216,16 +212,9 @@ func (cli *CLI) mineBlock() error {
 	if err != nil {
 		return err
 	}
-	serialize, err := newBlock.Serialize()
-	if err != nil {
-		return err
-	}
-	blockMsg := p2p.NewBlockMessage(serialize)
-	cli.node.Broadcast(blockMsg)
 
-	if err := cli.node.BroadcastChain(); err != nil {
-		log.Printf("Error broadcasting chain: %v", err)
-	}
+	invMsg := p2p.NewInvMessage([][]byte{newBlock.Hash})
+	cli.node.Broadcast(invMsg)
 
 	fmt.Printf("Block mined! Hash: %x, Height: %d\n", newBlock.Hash, newBlock.Height)
 	return nil
@@ -322,6 +311,12 @@ func (cli *CLI) handleTransactionDetails(parts []string) error {
 func (cli *CLI) handleMiningReward() (string, error) {
 	if len(cli.wallets) == 0 {
 		return "", fmt.Errorf("No wallets available. Create a wallet first with 'createwallet'")
+	}
+
+	if len(cli.wallets) == 1 {
+		for _, wallet := range cli.wallets {
+			return wallet.GetAddress(), nil
+		}
 	}
 
 	fmt.Println("Available wallets:")

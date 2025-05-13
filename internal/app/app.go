@@ -79,7 +79,7 @@ func (a *App) startAutomaticMode() {
 	fmt.Println("Running in non-interactive mode")
 	fmt.Printf("Mining blocks automatically every %d seconds\n",
 		int(a.config.MiningInterval.Seconds()))
-	fmt.Println("Use 'go run cmd/main.go -interactive -port=3000' for CLI mode")
+	fmt.Println("Use './crypto-simulator -interactive for CLI mode")
 
 	go a.automaticMining()
 
@@ -118,12 +118,9 @@ func (a *App) mineNewBlock() error {
 	if err != nil {
 		return err
 	}
-	serialize, err := newBlock.Serialize()
-	if err != nil {
-		return err
-	}
-	blockMsg := p2p.NewBlockMessage(serialize)
-	a.node.Broadcast(blockMsg)
+
+	invMsg := p2p.NewInvMessage([][]byte{newBlock.Hash})
+	a.node.Broadcast(invMsg)
 
 	fmt.Printf("Block mined! Hash: %x, Height: %d, Transactions: %d\n",
 		newBlock.Hash, newBlock.Height, len(newBlock.Transactions))

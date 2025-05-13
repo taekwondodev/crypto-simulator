@@ -110,7 +110,7 @@ func addBlockToDb(tx *bbolt.Tx, bc *Blockchain, newBlock *block.Block) error {
 	}
 	b.Put(newBlock.Hash, serialize)
 	b.Put([]byte("l"), newBlock.Hash)
-	bc.Tip = newBlock.Hash
+	bc.tip = newBlock.Hash
 
 	key := []byte(strconv.Itoa(newBlock.Height))
 	heightBucket.Put(key, newBlock.Hash)
@@ -187,5 +187,25 @@ func getHashBlockByHeight(tx *bbolt.Tx, height int, blockData *[]byte) error {
 	}
 
 	*blockData = blockBucket.Get(hash)
+	return nil
+}
+
+func getBlockByPreviousHash(tx *bbolt.Tx, prevHash []byte, foundBlock *block.Block) error {
+	b := tx.Bucket([]byte(blocksBucket))
+	c := b.Cursor()
+
+	for k, v := c.First(); k != nil; k, v = c.Next() {
+		if bytes.Equal(k, []byte("l")) {
+			continue // skip tip pointer
+		}
+		blk, err := block.Deserialize(v)
+		if err != nil {
+			return err
+		}
+		if bytes.Equal(blk.PreviousHash, prevHash) {
+			foundBlock = blk
+			break
+		}
+	}
 	return nil
 }

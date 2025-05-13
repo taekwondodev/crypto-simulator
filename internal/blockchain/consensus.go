@@ -39,53 +39,69 @@ func (bc *Blockchain) FindTransaction(id []byte) *transaction.Transaction {
 	return t
 }
 
-func (bc *Blockchain) GetChainFrom(startHash []byte) []*block.Block {
-	var chain []*block.Block
-	currentHash := startHash
+func (bc *Blockchain) GetBlockLocator(lastKnownHash []byte) ([][]byte, error) {
+	var locator [][]byte
+	step := 1
 
-	bc.Db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(blocksBucket))
-		for currentHash != nil {
-			blk, err := block.Deserialize(b.Get(currentHash))
-			if err != nil {
-				return err
-			}
-			chain = append(chain, blk)
-			currentHash = blk.PreviousHash
-		}
-		return nil
-	})
-	return reverseChain(chain)
-}
-
-func (bc *Blockchain) GetBlockLocator(lastKnownHash []byte) ([]*block.Block, [][]byte, error) {
-	var blocks []*block.Block
-	var hashes [][]byte
-	found := false
-
-	err := bc.Db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(blocksBucket))
-		c := b.Cursor()
-
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if found && len(blocks) < 10 {
-				blk, err := block.Deserialize(v)
-				if err != nil {
-					return err
-				}
-				blocks = append(blocks, blk)
-			}
-
-			if bytes.Equal(k, lastKnownHash) {
-				found = true
-			}
-		}
-		return nil
-	})
-
-	for _, blk := range blocks {
-		hashes = append(hashes, blk.Hash)
+	currentHash := bc.tip
+	if lastKnownHash != nil {
+		currentHash = lastKnownHash
 	}
 
-	return blocks, hashes, err
+	for range 10 { // Limita a 10 hop
+		locator = append(locator, currentHash)
+		block, err := bc.GetBlock(currentHash)
+		if err != nil {
+			return nil, err
+		}
+		if block == nil {
+			break
+		}
+
+		for range step {
+			currentHash = block.PreviousHash
+			block, err = bc.GetBlock(currentHash)
+			if err != nil {
+				return nil, err
+			}
+			if block == nil {
+				break
+			}
+		}
+		step *= 2
+	}
+	return locator, nil
+}
+
+func (bc *Blockchain) GetFirstMatchingBlock(hashes [][]byte) (*block.Block, error) {
+	for _, hash := range hashes {
+		block, err := bc.GetBlock(hash)
+		if err != nil {
+			return nil, err
+		}
+		if block != nil {
+			return block, nil
+		}
+	}
+
+	return bc.GetBlockAtHeight(0)
+}
+
+func (bc *Blockchain) GetNextBlockHashes(block *block.Block, limit int) ([][]byte, error) {
+	var hashes [][]byte
+	currentHash := block.Hash
+
+	for range limit {
+		next, err := bc.GetBlockByPreviousHash(currentHash)
+		if err != nil {
+			return nil, err
+		}
+		if next == nil {
+			break
+		}
+		hashes = append(hashes, next.Hash)
+		currentHash = next.Hash
+	}
+
+	return hashes, nil
 }

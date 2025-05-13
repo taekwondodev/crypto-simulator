@@ -87,6 +87,11 @@ func sendInvMessage(conn net.Conn, hashes [][]byte) error {
 	return writeMessage(conn, msg)
 }
 
+func sendGetBlocksMessage(conn net.Conn, locator [][]byte) error {
+	msg := NewGetBlocksMessage(locator)
+	return writeMessage(conn, msg)
+}
+
 func sendGetDataMessage(conn net.Conn, hashes [][]byte) error {
 	msg := NewGetDataMessage(hashes)
 	return writeMessage(conn, msg)

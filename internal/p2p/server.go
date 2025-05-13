@@ -5,7 +5,6 @@ import (
 	"encoding/gob"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"log"
 	"net"
 
@@ -20,7 +19,7 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) error {
 		MsgPing:      func(m *Message, c net.Conn) error { return n.handlePing(c) },
 		MsgPong:      func(m *Message, c net.Conn) error { return n.handlePong() },
 		MsgTx:        func(m *Message, c net.Conn) error { return n.handleTransaction(m) },
-		MsgBlock:     func(m *Message, c net.Conn) error { return n.handleBlock(m) },
+		MsgBlock:     func(m *Message, c net.Conn) error { return n.handleBlock(m, c) },
 		MsgGetBlocks: func(m *Message, c net.Conn) error { return n.handleGetBlocks(m, c) },
 		MsgInv:       func(m *Message, c net.Conn) error { return n.handleInventory(m, c) },
 		MsgGetData:   func(m *Message, c net.Conn) error { return n.handleGetData(m, c) },
@@ -60,7 +59,7 @@ func (n *Node) handlePong() error {
 	return nil
 }
 
-func (n *Node) handleBlock(msg *Message) error {
+func (n *Node) handleBlock(msg *Message, conn net.Conn) error {
 	newBlock, err := block.Deserialize(msg.Payload)
 	if err != nil {
 		return err
@@ -79,9 +78,7 @@ func (n *Node) handleBlock(msg *Message) error {
 		return err
 	}
 	if previousBlock == nil {
-		getBlockMsg := NewGetBlocksMessage(newBlock.PreviousHash)
-		n.Broadcast(getBlockMsg)
-		return fmt.Errorf("missing previous block, requesting chain")
+		return n.handleSync(conn)
 	}
 
 	if _, err := n.blockchain.AddBlock(newBlock.Transactions); err != nil {
@@ -98,6 +95,10 @@ func (n *Node) handleTransaction(msg *Message) error {
 	}
 
 	if n.mempool.ValidateTransaction(tx) {
+		txID := hex.EncodeToString(tx.ID)
+		if n.mempool.Get(txID) != nil {
+			return nil
+		}
 		n.mempool.Add(tx)
 		n.Broadcast(msg)
 	}
@@ -106,43 +107,27 @@ func (n *Node) handleTransaction(msg *Message) error {
 }
 
 func (n *Node) handleGetBlocks(msg *Message, conn net.Conn) error {
-	var lastKnownHash []byte
-	if len(msg.Payload) > 0 {
-		lastKnownHash = msg.Payload
-	}
-
-	blocks, locator, err := n.blockchain.GetBlockLocator(lastKnownHash)
+	locator, err := deserializeHashes(msg.Payload)
 	if err != nil {
 		return err
 	}
 
-	if err := sendInvMessage(conn, locator); err != nil {
+	startBlock, err := n.blockchain.GetFirstMatchingBlock(locator)
+	if err != nil {
+		return err
+	}
+	nextBlocks, err := n.blockchain.GetNextBlockHashes(startBlock, 10)
+	if err != nil {
 		return err
 	}
 
-	for _, block := range blocks {
-		serializedBlock, err := block.Serialize()
-		if err != nil {
-			return err
-		}
-		if err := sendBlockMessage(conn, serializedBlock); err != nil {
-			return err
-		}
-	}
-	return nil
+	return sendInvMessage(conn, nextBlocks)
 }
 
 func (n *Node) handleInventory(msg *Message, conn net.Conn) error {
 	hashes, err := deserializeHashes(msg.Payload)
 	if err != nil {
 		return err
-	}
-
-	if len(hashes) > 0 {
-		if ch, exists := n.pendingInventoryReqs[hex.EncodeToString(hashes[0])]; exists {
-			ch <- hashes
-			return nil
-		}
 	}
 
 	unknownHashes, err := n.collectUnknownBlockHashes(hashes)
@@ -193,6 +178,14 @@ func (n *Node) handleGetAddr(conn net.Conn) error {
 	addresses := n.collectPeerAddresses()
 	buffer := serializeAddresses(addresses)
 	return sendAddrMessage(conn, buffer)
+}
+
+func (n *Node) handleSync(conn net.Conn) error {
+	locator, err := n.blockchain.GetBlockLocator(nil)
+	if err != nil {
+		return err
+	}
+	return sendGetBlocksMessage(conn, locator)
 }
 
 /*********************************************************************************************/

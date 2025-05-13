@@ -79,12 +79,12 @@ func NewBlockMessage(blockData []byte) *Message {
 	}
 }
 
-func NewGetBlocksMessage(lastKnownHash []byte) *Message {
+func NewGetBlocksMessage(locator [][]byte) *Message {
 	return &Message{
 		Version:   0x01,
 		Type:      MsgGetBlocks,
 		Timestamp: time.Now().Unix(),
-		Payload:   lastKnownHash,
+		Payload:   serializeHashes(locator),
 	}
 }
 

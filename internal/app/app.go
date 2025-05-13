@@ -114,8 +114,12 @@ func (a *App) mineNewBlock() error {
 		return err
 	}
 
-	newBlock, err := a.blockchain.AddBlock(txs)
+	newBlock, err := a.blockchain.CreateBlock(txs)
 	if err != nil {
+		return err
+	}
+
+	if err := a.blockchain.AddBlock(newBlock); err != nil {
 		return err
 	}
 

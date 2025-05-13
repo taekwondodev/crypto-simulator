@@ -65,6 +65,32 @@ func (b *Block) Mine() error {
 	return err
 }
 
+func (b *Block) IsValid(prevBlock *Block) bool {
+	if !bytes.Equal(b.PreviousHash, prevBlock.Hash) {
+		return false
+	}
+
+	calculatedHash, err := b.calculateHash()
+	if err != nil {
+		return false
+	}
+	if !bytes.Equal(calculatedHash, b.Hash) {
+		return false
+	}
+
+	target := strings.Repeat("0", b.Difficulty)
+	hashStr := hex.EncodeToString(b.Hash)
+	if !strings.HasPrefix(hashStr, target) {
+		return false
+	}
+
+	if b.Height != prevBlock.Height+1 {
+		return false
+	}
+
+	return true
+}
+
 func (b *Block) calculateHash() ([]byte, error) {
 	tx, err := serializeTransactions(b.Transactions)
 	if err != nil {

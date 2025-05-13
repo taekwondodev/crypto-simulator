@@ -82,7 +82,7 @@ func (n *Node) handleBlock(msg *Message, conn net.Conn) error {
 		return n.handleSync(conn)
 	}
 
-	if _, err := n.blockchain.AddBlock(newBlock.Transactions); err != nil {
+	if err := n.blockchain.AddBlock(newBlock); err != nil {
 		return err
 	}
 

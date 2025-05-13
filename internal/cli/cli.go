@@ -208,8 +208,12 @@ func (cli *CLI) mineBlock() error {
 		return err
 	}
 
-	newBlock, err := cli.bc.AddBlock(txs)
+	newBlock, err := cli.bc.CreateBlock(txs)
 	if err != nil {
+		return err
+	}
+
+	if err := cli.bc.AddBlock(newBlock); err != nil {
 		return err
 	}
 

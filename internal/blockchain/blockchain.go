@@ -50,7 +50,13 @@ func (bc *Blockchain) InitHeightIndex() {
 	}
 }
 
-func (bc *Blockchain) AddBlock(txs []*transaction.Transaction) (*block.Block, error) {
+func (bc *Blockchain) CreateBlock(txs []*transaction.Transaction) (*block.Block, error) {
+	for _, tx := range txs {
+		if !bc.VerifyTransaction(tx) {
+			return nil, fmt.Errorf("invalid transaction %x", tx.ID)
+		}
+	}
+
 	difficulty, err := adjustDifficulty(bc)
 	if err != nil {
 		return nil, err
@@ -65,19 +71,24 @@ func (bc *Blockchain) AddBlock(txs []*transaction.Transaction) (*block.Block, er
 		return nil, err
 	}
 	err = newBlock.Mine()
-	if err != nil {
-		return nil, err
+	return newBlock, err
+}
+
+func (bc *Blockchain) AddBlock(newBlock *block.Block) error {
+	previousBlock, _ := bc.GetBlock(bc.tip)
+	if !newBlock.IsValid(previousBlock) {
+		return fmt.Errorf("invalid block: %x", newBlock.Hash)
 	}
 
-	err = bc.Db.Update(func(tx *bbolt.Tx) error {
+	err := bc.Db.Update(func(tx *bbolt.Tx) error {
 		return addBlockToDb(tx, bc, newBlock)
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("Failed to persist block: %w", err)
+		return fmt.Errorf("Failed to persist block: %w", err)
 	}
 
-	return newBlock, nil
+	return nil
 }
 
 func (bc *Blockchain) GetUTXOs(address string) ([]*utxo.UTXO, error) {

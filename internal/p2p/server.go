@@ -79,6 +79,7 @@ func (n *Node) handleBlock(msg *Message, conn net.Conn) error {
 		return err
 	}
 	if previousBlock == nil {
+		log.Printf("Received block with unknown previous hash")
 		return n.handleSync(conn)
 	}
 
@@ -86,6 +87,7 @@ func (n *Node) handleBlock(msg *Message, conn net.Conn) error {
 		return err
 	}
 
+	log.Printf("Added new block to the blockchain at height: %d\n", newBlock.Height)
 	return nil
 }
 
@@ -135,6 +137,7 @@ func (n *Node) handleInventory(msg *Message, conn net.Conn) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("Blockchain has no unknown blocks")
 
 	if len(unknownHashes) > 0 {
 		return sendGetDataMessage(conn, unknownHashes, n.Address)

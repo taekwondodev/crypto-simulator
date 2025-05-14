@@ -75,7 +75,7 @@ func (b *Block) IsValid(prevBlock *Block) error {
 		return err
 	}
 	if !bytes.Equal(calculatedHash, b.Hash) {
-		return fmt.Errorf("Hash does not match, block compromised\nStored: %x\nCalculated: %x", b.Hash, calculatedHash)
+		return fmt.Errorf("Hash does not match, block compromised")
 	}
 
 	target := strings.Repeat("0", b.Difficulty)

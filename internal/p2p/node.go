@@ -187,7 +187,11 @@ func (n *Node) handleConnectionServer(conn net.Conn) {
 	defer conn.Close()
 
 	if err := n.performHandshakeServer(conn); err != nil {
-		log.Printf("Handshake failed: %v", err)
+		if err != io.EOF {
+			log.Printf("Handshake failed: %v", err)
+		} else {
+			log.Printf("Connection closed by peer: %v", err)
+		}
 		return
 	}
 

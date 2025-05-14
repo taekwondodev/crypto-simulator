@@ -222,7 +222,7 @@ func (cli *CLI) mineBlock() error {
 	if err := cli.bc.AddBlock(newBlock); err != nil {
 		return err
 	}
-	fmt.Printf("Block mined! Hash: %x, Height: %d\n", newBlock.Hash, newBlock.Height)
+	fmt.Printf("Block mined! Height: %d\n", newBlock.Height)
 
 	invMsg := p2p.NewInvMessage([][]byte{newBlock.Hash})
 	cli.node.Broadcast(invMsg)

@@ -23,12 +23,12 @@ type Block struct {
 	Hash         []byte
 }
 
-func Genesis(height int, transactions []*transaction.Transaction, prevHash []byte, difficulty int, timestamp int64) (*Block, error) {
+func Genesis(height int, transactions []*transaction.Transaction, difficulty int, timestamp int64) (*Block, error) {
 	var err error
 	block := &Block{
 		Height:       height,
 		Timestamp:    time.Unix(timestamp, 0),
-		PreviousHash: prevHash,
+		PreviousHash: nil,
 		Transactions: transactions,
 		Nonce:        0,
 		Difficulty:   difficulty,
@@ -75,7 +75,7 @@ func (b *Block) IsValid(prevBlock *Block) error {
 		return err
 	}
 	if !bytes.Equal(calculatedHash, b.Hash) {
-		return fmt.Errorf("Hash does not match, block compromised")
+		return fmt.Errorf("Hash does not match, block compromised\nStored: %x\nCalculated: %x", b.Hash, calculatedHash)
 	}
 
 	target := strings.Repeat("0", b.Difficulty)
@@ -99,6 +99,7 @@ func (b *Block) calculateHash() ([]byte, error) {
 	timestampBytes := []byte(strconv.FormatInt(b.Timestamp.Unix(), 10))
 	data := bytes.Join(
 		[][]byte{
+			[]byte(strconv.Itoa(b.Height)),
 			timestampBytes,
 			b.PreviousHash,
 			tx,

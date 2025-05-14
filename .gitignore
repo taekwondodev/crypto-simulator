@@ -29,3 +29,6 @@ go.work.sum
 
 # Build file
 crypto-simulator
+
+# Test cmd
+cmd/package/

@@ -42,7 +42,7 @@ func createGenesisBlock(tx *bbolt.Tx, tip *[]byte) error {
 		return err
 	}
 	fixedTimestamp := int64(1710000000)
-	genesis, err := block.Genesis(0, []*transaction.Transaction{coinbase}, nil, 1, fixedTimestamp)
+	genesis, err := block.Genesis(0, []*transaction.Transaction{coinbase}, 1, fixedTimestamp)
 	if err != nil {
 		return err
 	}

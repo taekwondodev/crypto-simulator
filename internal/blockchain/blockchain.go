@@ -75,6 +75,12 @@ func (bc *Blockchain) CreateBlock(txs []*transaction.Transaction) (*block.Block,
 }
 
 func (bc *Blockchain) AddBlock(newBlock *block.Block) error {
+	for _, tx := range newBlock.Transactions {
+		if !bc.VerifyTransaction(tx) {
+			return fmt.Errorf("invalid transaction %x", tx.ID)
+		}
+	}
+
 	previousBlock, _ := bc.GetBlock(newBlock.PreviousHash)
 	if err := newBlock.IsValid(previousBlock); err != nil {
 		return err

@@ -76,19 +76,19 @@ go build -o crypto-simulator ./cmd
 
 ## CLI Commands
 
-| Command                          | Description                                      |
-|----------------------------------|--------------------------------------------------|
-| `help`                           | Show available commands                          |
-| `createwallet`                   | Create a new wallet                              |
-| `listwallet`                     | List all wallets                                 |
-| `balance <name>`                 | Get balance for wallet                           |
-| `send <from> <to> <amount>`      | Send coins from one wallet to another            |
-| `mine`                           | Mine a new block with transactions from mempool  |
-| `blockchain`                     | Print the blockchain                             |
-| `mempool`                        | Show transactions in mempool                     |
-| `peers`                          | List connected peers                             |
-| `connect <address>`              | Connect to a peer                                |
-| `tx <txid>`                      | View transaction details                         |
+| Command                                  | Description                                      |
+|------------------------------------------|--------------------------------------------------|
+| `help`                                   | Show available commands                          |
+| `createwallet`                           | Create a new wallet                              |
+| `listwallet`                             | List all wallets                                 |
+| `balance <name>`                         | Get balance for wallet                           |
+| `send <from> <to-address> <amount>`      | Send coins from one wallet to another            |
+| `mine`                                   | Mine a new block with transactions from mempool  |
+| `blockchain`                             | Print the blockchain                             |
+| `mempool`                                | Show transactions in mempool                     |
+| `peers`                                  | List connected peers                             |
+| `connect <address>`                      | Connect to a peer                                |
+| `tx <txid>`                              | View transaction details                         |
 
 ## Project Structure
 

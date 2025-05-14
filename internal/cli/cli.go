@@ -86,17 +86,17 @@ func (cli *CLI) Run() {
 
 func (cli *CLI) printHelp() error {
 	fmt.Println("Commands:")
-	fmt.Println("  createwallet         - Create a new wallet")
-	fmt.Println("  listwallet           - List all wallets")
-	fmt.Println("  balance <name>       - Get balance for wallet")
-	fmt.Println("  send <from> <to> <amount> - Send coins from one wallet to another")
-	fmt.Println("  mine                 - Mine a new block with transactions from mempool")
-	fmt.Println("  blockchain           - Print the blockchain")
-	fmt.Println("  mempool              - Show transactions in mempool")
-	fmt.Println("  peers                - List connected peers")
-	fmt.Println("  connect <address>    - Connect to a peer")
-	fmt.Println("  exit                 - Exit the program")
-	fmt.Println("  tx <txid>            - View transaction details")
+	fmt.Println("  createwallet         			 - Create a new wallet")
+	fmt.Println("  listwallet          				 - List all wallets")
+	fmt.Println("  balance <name>       			 - Get balance for wallet")
+	fmt.Println("  send <from> <to-address> <amount> - Send coins from one wallet to another")
+	fmt.Println("  mine                 			 - Mine a new block with transactions from mempool")
+	fmt.Println("  blockchain           			 - Print the blockchain")
+	fmt.Println("  mempool              			 - Show transactions in mempool")
+	fmt.Println("  peers                			 - List connected peers")
+	fmt.Println("  connect <address>    			 - Connect to a peer")
+	fmt.Println("  exit                 			 - Exit the program")
+	fmt.Println("  tx <txid>            			 - View transaction details")
 	return nil
 }
 
@@ -155,11 +155,11 @@ func (cli *CLI) handleBalance(parts []string) error {
 
 func (cli *CLI) handleSend(parts []string) error {
 	if len(parts) < 4 {
-		return fmt.Errorf("Usage: send <from-wallet> <to-wallet> <amount>")
+		return fmt.Errorf("Usage: send <from-wallet> <to-address> <amount>")
 	}
 
 	fromName := parts[1]
-	toName := parts[2]
+	toAddress := parts[2]
 
 	amount, err := parseAmount(parts[3])
 	if err != nil {
@@ -167,11 +167,6 @@ func (cli *CLI) handleSend(parts []string) error {
 	}
 
 	from, err := handleWalletLookupError(cli.wallets, fromName)
-	if err != nil {
-		return err
-	}
-
-	to, err := handleWalletLookupError(cli.wallets, toName)
 	if err != nil {
 		return err
 	}
@@ -188,7 +183,7 @@ func (cli *CLI) handleSend(parts []string) error {
 		return fmt.Errorf("Not enough balance. Available: %d, Required: %d", balance, amount)
 	}
 
-	tx, err := createTransaction(from, to, amount, utxos)
+	tx, err := createTransaction(from, toAddress, amount, utxos)
 	if err != nil {
 		return err
 	}
@@ -198,7 +193,7 @@ func (cli *CLI) handleSend(parts []string) error {
 	cli.node.Broadcast(invMsg)
 
 	fmt.Printf("Transaction created: %x\n", tx.ID)
-	fmt.Printf("Sent %d coins from %s to %s\n", amount, fromName, toName)
+	fmt.Printf("Sent %d coins from %s to %s\n", amount, fromName, toAddress)
 	fmt.Println("Transaction is in mempool, waiting to be mined")
 	return nil
 }

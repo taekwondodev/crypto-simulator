@@ -39,13 +39,13 @@ func parseAmount(amountStr string) (int, error) {
 	return amount, nil
 }
 
-func createTransaction(fromWallet, toWallet *Wallet, amount int, utxos []*utxo.UTXO) (*transaction.Transaction, error) {
+func createTransaction(fromWallet *Wallet, toAddress string, amount int, utxos []*utxo.UTXO) (*transaction.Transaction, error) {
 	inputs, collected, err := selectInputs(fromWallet, utxos, amount)
 	if err != nil {
 		return nil, err
 	}
 
-	outputs := createOutputs(fromWallet.GetAddress(), toWallet.GetAddress(), amount, collected)
+	outputs := createOutputs(fromWallet.GetAddress(), toAddress, amount, collected)
 
 	return transaction.New(inputs, outputs)
 }

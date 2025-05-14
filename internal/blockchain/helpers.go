@@ -34,7 +34,7 @@ func adjustDifficulty(bc *Blockchain) (int, error) {
 			return 0, err
 		}
 
-		timeSpan := lastBlock.Timestamp.Sub(tenBlocksAgo.Timestamp).Seconds()
+		timeSpan := float64(lastBlock.Timestamp - tenBlocksAgo.Timestamp)
 		expectedTimeSpan := float64(targetBlockTime * blocksToAdjust)
 
 		// Adjust difficulty based on time taken

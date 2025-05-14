@@ -1,8 +1,13 @@
+<div align="center">
+
 # Crypto-simulator
 
 <img alt="Go" src="https://img.shields.io/badge/Go-1.24.3+-00ADD8?logo=go">
+<img alt="MIT License" src="https://img.shields.io/badge/License-MIT-yellow.svg">
 
 A blockchain simulator that implements the core concepts of a cryptocurrency network including P2P networking, mining, transactions, and wallet management.
+
+</div>
 
 ## Features
 

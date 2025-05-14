@@ -83,7 +83,14 @@ func (n *Node) handleBlock(msg *Message, conn net.Conn) error {
 		return n.handleSync(conn)
 	}
 
+	// qui devo aggiungere alla chain solo se previousBlock è l'ultimo, confronto hash e bc.tip
+	// se non c'è un possibile fork
+	// devo recuperare una forkChain = buildForkFrom(newBlock)
+	// se forkChain.length > lunghezza della chain corrente -> reorganizeChain(forkChain)
+
 	if err := n.blockchain.AddBlock(newBlock); err != nil {
+		conn.Close()
+		n.removePeer(conn.RemoteAddr().String())
 		return err
 	}
 
@@ -137,12 +144,12 @@ func (n *Node) handleInventory(msg *Message, conn net.Conn) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("Blockchain has no unknown blocks")
 
 	if len(unknownHashes) > 0 {
 		return sendGetDataMessage(conn, unknownHashes, n.Address)
 	}
 
+	log.Printf("Blockchain has no unknown blocks")
 	return nil
 }
 

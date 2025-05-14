@@ -15,7 +15,7 @@ import (
 
 type Block struct {
 	Height       int
-	Timestamp    time.Time
+	Timestamp    int64
 	PreviousHash []byte
 	Transactions []*transaction.Transaction
 	Nonce        int
@@ -27,7 +27,7 @@ func Genesis(height int, transactions []*transaction.Transaction, difficulty int
 	var err error
 	block := &Block{
 		Height:       height,
-		Timestamp:    time.Unix(timestamp, 0),
+		Timestamp:    timestamp,
 		PreviousHash: nil,
 		Transactions: transactions,
 		Nonce:        0,
@@ -41,13 +41,12 @@ func New(height int, transactions []*transaction.Transaction, prevHash []byte, d
 	var err error
 	block := &Block{
 		Height:       height,
-		Timestamp:    time.Now(),
+		Timestamp:    time.Now().Unix(),
 		PreviousHash: prevHash,
 		Transactions: transactions,
 		Nonce:        0,
 		Difficulty:   difficulty,
 	}
-	block.Hash, err = block.calculateHash()
 	return block, err
 }
 
@@ -55,14 +54,17 @@ func (b *Block) Mine() error {
 	target := strings.Repeat("0", b.Difficulty)
 	var err error
 	for {
+		b.Hash, err = b.calculateHash()
+		if err != nil {
+			return err
+		}
 		hashStr := hex.EncodeToString(b.Hash)
 		if strings.HasPrefix(hashStr, target) {
 			break
 		}
 		b.Nonce++
-		b.Hash, err = b.calculateHash()
 	}
-	return err
+	return nil
 }
 
 func (b *Block) IsValid(prevBlock *Block) error {
@@ -96,19 +98,16 @@ func (b *Block) calculateHash() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	timestampBytes := []byte(strconv.FormatInt(b.Timestamp.Unix(), 10))
-	data := bytes.Join(
-		[][]byte{
-			[]byte(strconv.Itoa(b.Height)),
-			timestampBytes,
-			b.PreviousHash,
-			tx,
-			[]byte(strconv.Itoa(b.Nonce)),
-			[]byte(strconv.Itoa(b.Difficulty)),
-		},
-		[]byte{},
-	)
-	hash := sha256.Sum256(data)
+
+	var buf bytes.Buffer
+	buf.WriteString(strconv.Itoa(b.Height))
+	buf.WriteString(strconv.FormatInt(b.Timestamp, 10))
+	buf.Write(b.PreviousHash)
+	buf.Write(tx)
+	buf.WriteString(strconv.Itoa(b.Nonce))
+	buf.WriteString(strconv.Itoa(b.Difficulty))
+
+	hash := sha256.Sum256(buf.Bytes())
 	return hash[:], nil
 }
 
@@ -143,9 +142,15 @@ func Deserialize(data []byte) (*Block, error) {
 }
 
 func (b *Block) Print() {
-	fmt.Printf("Block %d: %x\n", b.Height, b.Hash)
-	fmt.Printf("  Transactions: %d\n", len(b.Transactions))
-	fmt.Printf("  Timestamp: %s\n", b.Timestamp.Format(time.RFC3339))
+	fmt.Printf("Block %d\n", b.Height)
+	fmt.Printf("  Hash: %x\n", b.Hash)
+	fmt.Printf("  Prev: %x\n", b.PreviousHash)
+	fmt.Printf("  Nonce: %d\n", b.Nonce)
 	fmt.Printf("  Difficulty: %d\n", b.Difficulty)
+	fmt.Printf("  Timestamp: %s (%d)\n", time.Unix(b.Timestamp, 0).Format(time.RFC3339), b.Timestamp)
+	fmt.Printf("  Transactions: %d\n", len(b.Transactions))
+	for _, tx := range b.Transactions {
+		fmt.Printf("    - %x\n", tx.ID)
+	}
 	fmt.Println()
 }

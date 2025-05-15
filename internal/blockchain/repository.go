@@ -210,3 +210,139 @@ func getBlockByPreviousHash(tx *bbolt.Tx, prevHash []byte, foundBlock **block.Bl
 	}
 	return nil
 }
+
+func rollbackBlocks(
+	tx *bbolt.Tx, bc *Blockchain, commonAncestor *block.Block,
+	oldBlocks []*block.Block, newBlocks []*block.Block, heightBucket *bbolt.Bucket,
+) ([]*transaction.Transaction, error) {
+	utxoBucket := tx.Bucket([]byte(utxoBucket))
+
+	var txToRestore []*transaction.Transaction
+
+	for _, blk := range oldBlocks {
+		if bytes.Equal(blk.Hash, commonAncestor.Hash) {
+			continue // Skip common ancestor
+		}
+
+		for _, blockTx := range blk.Transactions {
+			if err := restoreSpentOutputs(utxoBucket, bc, blockTx); err != nil {
+				return nil, err
+			}
+
+			if err := removeCreatedOutputs(utxoBucket, blockTx); err != nil {
+				return nil, err
+			}
+
+			if !blockTx.IsCoinBase() && !txExistsInBlocks(blockTx.ID, newBlocks) {
+				txToRestore = append(txToRestore, blockTx)
+			}
+		}
+
+		heightBucket.Delete([]byte(strconv.Itoa(blk.Height)))
+	}
+
+	return txToRestore, nil
+}
+
+func restoreSpentOutputs(utxoBucket *bbolt.Bucket, bc *Blockchain, tx *transaction.Transaction) error {
+	if tx.IsCoinBase() {
+		return nil
+	}
+
+	for _, input := range tx.Inputs {
+		refTx := bc.FindTransaction(input.TxID)
+		if refTx == nil {
+			continue // Skip if not found
+		}
+
+		utxoToRestore := &utxo.UTXO{
+			TxID:   refTx.ID,
+			Index:  input.OutIndex,
+			Output: refTx.Outputs[input.OutIndex],
+		}
+
+		serialized, err := utxoToRestore.Serialize()
+		if err != nil {
+			return err
+		}
+
+		key := buildUTXOKey(refTx.ID, input.OutIndex)
+		utxoBucket.Put(key, serialized)
+	}
+	return nil
+}
+
+func removeCreatedOutputs(utxoBucket *bbolt.Bucket, tx *transaction.Transaction) error {
+	for outIdx := range tx.Outputs {
+		key := buildUTXOKey(tx.ID, outIdx)
+		utxoBucket.Delete(key)
+	}
+	return nil
+}
+
+func applyNewBlocksReverseOrder(
+	tx *bbolt.Tx, commonAncestor *block.Block, blocksBucket *bbolt.Bucket,
+	newBlocks []*block.Block, heightBucket *bbolt.Bucket,
+) error {
+	for i := len(newBlocks) - 1; i >= 0; i-- {
+		blk := newBlocks[i]
+		if bytes.Equal(blk.Hash, commonAncestor.Hash) {
+			continue // Skip common ancestor
+		}
+
+		if err := updateUTXOSet(tx, blk); err != nil {
+			return err
+		}
+
+		heightBucket.Put([]byte(strconv.Itoa(blk.Height)), blk.Hash)
+
+		blockData, err := blk.Serialize()
+		if err != nil {
+			return err
+		}
+		blocksBucket.Put(blk.Hash, blockData)
+	}
+
+	return nil
+}
+
+func (bc *Blockchain) collectChainHashes(chain *Blockchain) ([][]byte, error) {
+	const depthLimit = 100
+	var hashes [][]byte
+
+	err := chain.Db.View(func(tx *bbolt.Tx) error {
+		blocksBucket := tx.Bucket([]byte(blocksBucket))
+		currentHash := chain.tip
+
+		for range depthLimit {
+			if currentHash == nil {
+				break
+			}
+
+			blockData := blocksBucket.Get(currentHash)
+			if blockData == nil {
+				break
+			}
+
+			hashes = append(hashes, currentHash)
+
+			blockObj, err := block.Deserialize(blockData)
+			if err != nil {
+				return err
+			}
+
+			// Move to previous block
+			if blockObj.PreviousHash == nil {
+				break // Genesis block
+			}
+			currentHash = blockObj.PreviousHash
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return hashes, nil
+}

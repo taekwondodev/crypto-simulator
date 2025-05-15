@@ -122,7 +122,7 @@ func (n *Node) handleGetBlocks(msg *Message, conn net.Conn) error {
 		return err
 	}
 
-	startBlock, err := n.blockchain.GetFirstMatchingBlock(locator)
+	startBlock, err := n.blockchain.FindCommonBlock(locator)
 	if err != nil {
 		return err
 	}
@@ -182,7 +182,7 @@ func (n *Node) handleSync(conn net.Conn) error {
 func isPotentialFork(forkChain *blockchain.Blockchain, lastBlock *block.Block) bool {
 	defer func() {
 		forkChain.Close()
-		blockchain.CleanupForkDB(forkChain)
+		forkChain.CleanupForkDB(forkChain)
 	}()
 
 	forkHeight, _ := forkChain.CurrentHeight()

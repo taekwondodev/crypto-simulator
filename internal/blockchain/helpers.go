@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/taekwondodev/crypto-simulator/pkg/block"
 	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
 )
 
@@ -94,4 +95,15 @@ func buildUTXOKey(txID []byte, index int) []byte {
 		index = 0
 	}
 	return append([]byte("utxo:"), append(txID, byte(index))...)
+}
+
+func txExistsInBlocks(txID []byte, blocks []*block.Block) bool {
+	for _, blk := range blocks {
+		for _, tx := range blk.Transactions {
+			if bytes.Equal(tx.ID, txID) {
+				return true
+			}
+		}
+	}
+	return false
 }

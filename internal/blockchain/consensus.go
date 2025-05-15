@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"strconv"
 
 	"github.com/taekwondodev/crypto-simulator/pkg/block"
 	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
-	"github.com/taekwondodev/crypto-simulator/pkg/utxo"
 	"go.etcd.io/bbolt"
 )
 
@@ -77,18 +75,18 @@ func (bc *Blockchain) GetBlockLocator(lastKnownHash []byte) ([][]byte, error) {
 	return locator, nil
 }
 
-func (bc *Blockchain) GetFirstMatchingBlock(hashes [][]byte) (*block.Block, error) {
-	for _, hash := range hashes {
-		block, err := bc.GetBlock(hash)
-		if err != nil {
-			return nil, err
-		}
-		if block != nil {
-			return block, nil
-		}
+func (bc *Blockchain) FindCommonBlock(blockHashes [][]byte) (*block.Block, error) {
+	hashesMap := make(map[string]bool)
+	for _, hash := range blockHashes {
+		hashesMap[hex.EncodeToString(hash)] = true
 	}
 
-	return bc.GetBlockAtHeight(0)
+	lastBlock, err := bc.LastBlock()
+	if err != nil {
+		return nil, err
+	}
+
+	return bc.findFirstMatchingBlock(lastBlock, hashesMap)
 }
 
 func (bc *Blockchain) GetNextBlockHashes(block *block.Block, limit int) ([][]byte, error) {
@@ -134,8 +132,16 @@ func (bc *Blockchain) GetForkChain(hash []byte) (*Blockchain, error) {
 	return forkChain, nil
 }
 
+func (bc *Blockchain) CleanupForkDB(forkChain *Blockchain) error {
+	return forkChain.Db.Update(func(tx *bbolt.Tx) error {
+		return tx.ForEach(func(name []byte, _ *bbolt.Bucket) error {
+			return tx.DeleteBucket(name)
+		})
+	})
+}
+
 func (bc *Blockchain) ReorganizeChain(oldTip *block.Block, newChain *Blockchain) ([]*transaction.Transaction, error) {
-	commonAncestor, err := bc.findForkPoint(oldTip, newChain)
+	commonAncestor, err := bc.findForkPoint(newChain)
 	if err != nil {
 		return nil, err
 	}
@@ -154,83 +160,17 @@ func (bc *Blockchain) ReorganizeChain(oldTip *block.Block, newChain *Blockchain)
 
 	var txToRestore []*transaction.Transaction
 	err = bc.Db.Update(func(tx *bbolt.Tx) error {
-		// Get necessary buckets
 		blocksBucket := tx.Bucket([]byte(blocksBucket))
-		utxoBucket := tx.Bucket([]byte(utxoBucket))
 		heightBucket := tx.Bucket([]byte(heightIndex))
 
-		// Rollback UTXO state - restore spent outputs and remove created outputs
-		// For each block being undone (except the common ancestor)
-		for _, blk := range oldBlocks {
-			if bytes.Equal(blk.Hash, commonAncestor.Hash) {
-				continue // Skip common ancestor
-			}
-
-			// For each transaction in the block
-			for _, tx := range blk.Transactions {
-				// Restore inputs (previously spent outputs)
-				if !tx.IsCoinBase() {
-					for _, input := range tx.Inputs {
-						// Find the referenced transaction
-						refTx := bc.FindTransaction(input.TxID)
-						if refTx == nil {
-							continue // Skip if not found
-						}
-
-						// Restore the UTXO
-						utxo := &utxo.UTXO{
-							TxID:   refTx.ID,
-							Index:  input.OutIndex,
-							Output: refTx.Outputs[input.OutIndex],
-						}
-
-						serialized, err := utxo.Serialize()
-						if err != nil {
-							return err
-						}
-
-						key := buildUTXOKey(refTx.ID, input.OutIndex)
-						utxoBucket.Put(key, serialized)
-					}
-				}
-				// Remove outputs created in this block
-				for outIdx := range tx.Outputs {
-					key := buildUTXOKey(tx.ID, outIdx)
-					utxoBucket.Delete(key)
-				}
-
-				// Add transaction to mempool if not in new chain
-				if !tx.IsCoinBase() && !txExistsInBlocks(tx.ID, newBlocks) {
-					txToRestore = append(txToRestore, tx)
-				}
-			}
-
-			// Update height index
-			heightBucket.Delete([]byte(strconv.Itoa(blk.Height)))
+		restoredTxs, err := rollbackBlocks(tx, bc, commonAncestor, oldBlocks, newBlocks, heightBucket)
+		if err != nil {
+			return err
 		}
+		txToRestore = restoredTxs
 
-		// Apply new blocks in reverse order (from oldest to newest)
-		// We reverse newBlocks since it was collected from tip to ancestor
-		for i := len(newBlocks) - 1; i >= 0; i-- {
-			blk := newBlocks[i]
-			if bytes.Equal(blk.Hash, commonAncestor.Hash) {
-				continue // Skip common ancestor
-			}
-
-			// Update UTXO set with the new block
-			if err := updateUTXOSet(tx, blk); err != nil {
-				return err
-			}
-
-			// Update height index
-			heightBucket.Put([]byte(strconv.Itoa(blk.Height)), blk.Hash)
-
-			// Update block storage if needed
-			blockData, err := blk.Serialize()
-			if err != nil {
-				return err
-			}
-			blocksBucket.Put(blk.Hash, blockData)
+		if err := applyNewBlocksReverseOrder(tx, commonAncestor, blocksBucket, newBlocks, heightBucket); err != nil {
+			return err
 		}
 
 		// Update chain tip
@@ -243,68 +183,18 @@ func (bc *Blockchain) ReorganizeChain(oldTip *block.Block, newChain *Blockchain)
 	if err != nil {
 		return nil, err
 	}
+
+	bc.utxoCache.Purge()
 	return txToRestore, nil
 }
 
-func (bc *Blockchain) findForkPoint(blockA *block.Block, chainB *Blockchain) (*block.Block, error) {
-	seen := make(map[string]bool)
-
-	currentB := chainB.tip
-	depthLimit := 100 // Limit how far back we'll scan to avoid huge maps
-
-	err := chainB.Db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(blocksBucket))
-
-		for range depthLimit {
-			blockData := b.Get(currentB)
-			if blockData == nil {
-				break
-			}
-
-			blockObj, err := block.Deserialize(blockData)
-			if err != nil {
-				return err
-			}
-
-			// Add to map
-			seen[hex.EncodeToString(currentB)] = true
-
-			// Move to previous block
-			if blockObj.PreviousHash == nil {
-				break // Genesis block
-			}
-			currentB = blockObj.PreviousHash
-		}
-		return nil
-	})
-
+func (bc *Blockchain) findForkPoint(chainB *Blockchain) (*block.Block, error) {
+	hashesB, err := bc.collectChainHashes(chainB)
 	if err != nil {
 		return nil, err
 	}
 
-	current := blockA
-	for {
-		if current == nil {
-			return nil, fmt.Errorf("no common ancestor found between chains")
-		}
-
-		// Check if this block exists in chain B
-		hashStr := hex.EncodeToString(current.Hash)
-		if seen[hashStr] {
-			return current, nil
-		}
-
-		// Move to previous block
-		if current.PreviousHash == nil {
-			return nil, fmt.Errorf("no common ancestor found between chains")
-		}
-
-		var err error
-		current, err = bc.GetBlock(current.PreviousHash)
-		if err != nil {
-			return nil, err
-		}
-	}
+	return bc.FindCommonBlock(hashesB)
 }
 
 func (bc *Blockchain) collectBlocksFrom(startBlock, endBlock *block.Block) ([]*block.Block, error) {
@@ -344,21 +234,31 @@ func (bc *Blockchain) collectBlocksFrom(startBlock, endBlock *block.Block) ([]*b
 	return blocks, nil
 }
 
-func CleanupForkDB(forkChain *Blockchain) error {
-	return forkChain.Db.Update(func(tx *bbolt.Tx) error {
-		return tx.ForEach(func(name []byte, _ *bbolt.Bucket) error {
-			return tx.DeleteBucket(name)
-		})
-	})
-}
+func (bc *Blockchain) findFirstMatchingBlock(startBlock *block.Block, blocksMap map[string]bool) (*block.Block, error) {
+	current := startBlock
 
-func txExistsInBlocks(txID []byte, blocks []*block.Block) bool {
-	for _, blk := range blocks {
-		for _, tx := range blk.Transactions {
-			if bytes.Equal(tx.ID, txID) {
-				return true
-			}
+	for {
+		// Safety check
+		if current == nil {
+			return nil, fmt.Errorf("unexpected nil block during traversal")
+		}
+
+		// Check if current block exists in the other chain
+		hashStr := hex.EncodeToString(current.Hash)
+		if blocksMap[hashStr] {
+			return current, nil
+		}
+
+		// Check if we've reached genesis without finding a match
+		if current.PreviousHash == nil {
+			return nil, fmt.Errorf("no common ancestor found between chains (reached genesis)")
+		}
+
+		// Move to previous block
+		var err error
+		current, err = bc.GetBlock(current.PreviousHash)
+		if err != nil {
+			return nil, err
 		}
 	}
-	return false
 }

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 
+	"github.com/taekwondodev/crypto-simulator/internal/blockchain"
 	"github.com/taekwondodev/crypto-simulator/pkg/block"
 	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
 )
@@ -83,10 +84,9 @@ func (n *Node) handleBlock(msg *Message, conn net.Conn) error {
 		return n.handleSync(conn)
 	}
 
-	// qui devo aggiungere alla chain solo se previousBlock è l'ultimo, confronto hash e bc.tip
-	// se non c'è un possibile fork
-	// devo recuperare una forkChain = buildForkFrom(newBlock)
-	// se forkChain.length > lunghezza della chain corrente -> reorganizeChain(forkChain)
+	if err := n.handleFork(newBlock, previousBlock); err != nil {
+		return err
+	}
 
 	if err := n.blockchain.AddBlock(newBlock); err != nil {
 		conn.Close()
@@ -178,6 +178,47 @@ func (n *Node) handleSync(conn net.Conn) error {
 }
 
 /*********************************************************************************************/
+
+func isPotentialFork(forkChain *blockchain.Blockchain, lastBlock *block.Block) bool {
+	defer func() {
+		forkChain.Close()
+		blockchain.CleanupForkDB(forkChain)
+	}()
+
+	forkHeight, _ := forkChain.CurrentHeight()
+
+	if forkHeight <= lastBlock.Height {
+		return false
+	}
+
+	forkDifficulty, _ := forkChain.CurrentDifficulty()
+	return forkDifficulty > lastBlock.Difficulty
+}
+
+func (n *Node) handleFork(new, previous *block.Block) error {
+	lastBlock, err := n.blockchain.LastBlock()
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(previous.Hash, lastBlock.Hash) {
+		forkChain, err := n.blockchain.GetForkChain(new.Hash)
+		if err != nil {
+			return err
+		}
+		if isPotentialFork(forkChain, lastBlock) {
+			txsToRestore, err := n.blockchain.ReorganizeChain(lastBlock, forkChain)
+			if err != nil {
+				return err
+			}
+			for _, tx := range txsToRestore {
+				n.mempool.Add(tx)
+			}
+
+			log.Printf("Chain reorganized and %d transactions restored to mempool", len(txsToRestore))
+		}
+	}
+	return nil
+}
 
 func (n *Node) collectUnknownBlockHashes(hashes [][]byte) ([][]byte, error) {
 	var unknownHashes [][]byte

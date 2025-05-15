@@ -1,6 +1,6 @@
 <div align="center">
 
-# Crypto-simulator
+# Crypto-simulator CLI
 
 <img alt="Go" src="https://img.shields.io/badge/Go-1.24.3+-00ADD8?logo=go">
 <img alt="MIT License" src="https://img.shields.io/badge/License-MIT-yellow.svg">
@@ -38,6 +38,7 @@ git clone https://github.com/taekwondodev/crypto-simulator.git
 
 cd crypto-simulator
 touch blockchain.db
+touch fork.db
 go mod download
 
 go build -o crypto-simulator ./cmd

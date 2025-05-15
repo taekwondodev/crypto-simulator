@@ -25,6 +25,35 @@ A blockchain simulator that implements the core concepts of a cryptocurrency net
 
 - **Automatic Mining**: Background mining in non-interactive mode
 
+- **Deterministic Serialization**: Binary encoding ensures consistent blockchain state across nodes
+
+- **Advanced Fork Detection**: Robust mechanisms for identifying and resolving chain forks
+
+- **Performance Optimization**: UTXO caching for faster transaction validation and balance queries
+
+## Technical Details
+
+### Deterministic Binary Serialization
+All blockchain data (blocks, transactions, UTXOs) use deterministic binary encoding rather than generic serialization formats like GOB. This ensures that identical data produces identical byte representations across different nodes, preventing hash mismatches during block validation.
+
+### Fork Management
+The system includes sophisticated fork detection and resolution:
+- Hash-based block locators for efficiently finding common ancestors
+- Chain reorganization to handle longer competing chains
+- Transaction restoration from orphaned blocks back to mempool
+- Fork DB isolation to safely evaluate alternative chains
+
+### UTXO Management
+- In-memory LRU cache for frequently accessed UTXOs to reduce database reads
+- Efficient UTXO indexing for fast balance calculations and transaction verification
+- Proper handling of spent outputs during chain reorganization
+
+### Address Handling
+- SHA-256 hashing of public keys for address generation
+- Hex-encoding for human-readable address display
+- Binary representation for internal storage efficiency
+- ECDSA-based transaction signing and verification
+
 ## Installation
 
 ### Prerequisites

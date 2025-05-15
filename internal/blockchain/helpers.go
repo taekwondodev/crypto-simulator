@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"math/big"
 
 	"github.com/taekwondodev/crypto-simulator/pkg/block"
@@ -53,8 +54,11 @@ func adjustDifficulty(bc *Blockchain) (int, error) {
 
 func verifyInputTx(tx *transaction.Transaction, bc *Blockchain, inputSum *int) bool {
 	for _, in := range tx.Inputs {
-		utxos, err := bc.GetUTXOs(hex.EncodeToString(in.PubKey))
+		hash := sha256.Sum256(in.PubKey)
+		pubKeyString := hex.EncodeToString(hash[:])
+		utxos, err := bc.GetUTXOs(pubKeyString)
 		if err != nil {
+			log.Printf("Error getting UTXOs for pubKey %x: %v", in.PubKey, err)
 			return false
 		}
 		found := false
@@ -71,6 +75,7 @@ func verifyInputTx(tx *transaction.Transaction, bc *Blockchain, inputSum *int) b
 				pubKey := ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}
 
 				if !ecdsa.Verify(&pubKey, hash[:], r, s) {
+					log.Printf("Signature verification failed for txID: %x, index: %d", in.TxID, in.OutIndex)
 					return false
 				}
 				found = true
@@ -78,6 +83,7 @@ func verifyInputTx(tx *transaction.Transaction, bc *Blockchain, inputSum *int) b
 			}
 		}
 		if !found {
+			log.Printf("UTXO not found for txID: %x, index: %d", in.TxID, in.OutIndex)
 			return false
 		}
 	}

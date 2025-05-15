@@ -3,7 +3,8 @@ package p2p
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/gob"
+	"fmt"
+	"io"
 	"time"
 )
 
@@ -119,12 +120,12 @@ func (m *Message) Serialize() ([]byte, error) {
 
 func serializeHashes(hashes [][]byte) []byte {
 	var buffer bytes.Buffer
-	encoder := gob.NewEncoder(&buffer)
-	encoder.Encode(len(hashes))
+
+	binary.Write(&buffer, binary.LittleEndian, int32(len(hashes)))
 
 	for _, hash := range hashes {
-		encoder.Encode(len(hash))
-		encoder.Encode(hash)
+		binary.Write(&buffer, binary.LittleEndian, int32(len(hash)))
+		buffer.Write(hash)
 	}
 
 	return buffer.Bytes()
@@ -132,18 +133,25 @@ func serializeHashes(hashes [][]byte) []byte {
 
 func deserializeHashes(data []byte) ([][]byte, error) {
 	buffer := bytes.NewReader(data)
-	decoder := gob.NewDecoder(buffer)
 
-	var count int
-	if err := decoder.Decode(&count); err != nil {
-		return nil, err
+	var count int32
+	if err := binary.Read(buffer, binary.LittleEndian, &count); err != nil {
+		return nil, fmt.Errorf("failed to deserialize hash count: %w", err)
 	}
 
 	hashes := make([][]byte, count)
-	for i := range count {
-		if err := deserializeHash(decoder, &hashes, i); err != nil {
-			return nil, err
+	for i := int32(0); i < count; i++ {
+		var hashLen int32
+		if err := binary.Read(buffer, binary.LittleEndian, &hashLen); err != nil {
+			return nil, fmt.Errorf("failed to deserialize hash length: %w", err)
 		}
+
+		hash := make([]byte, hashLen)
+		if _, err := io.ReadFull(buffer, hash); err != nil {
+			return nil, fmt.Errorf("failed to deserialize hash: %w", err)
+		}
+
+		hashes[i] = hash
 	}
 
 	return hashes, nil
@@ -191,20 +199,5 @@ func writePayload(buffer *bytes.Buffer, m *Message) error {
 		}
 	}
 
-	return nil
-}
-
-func deserializeHash(decoder *gob.Decoder, hashes *[][]byte, i int) error {
-	var hashLen int
-	if err := decoder.Decode(&hashLen); err != nil {
-		return err
-	}
-
-	hash := make([]byte, hashLen)
-	if err := decoder.Decode(&hash); err != nil {
-		return err
-	}
-
-	(*hashes)[i] = hash
 	return nil
 }

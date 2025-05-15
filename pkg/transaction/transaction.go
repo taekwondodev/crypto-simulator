@@ -3,8 +3,9 @@ package transaction
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/gob"
+	"encoding/binary"
 	"fmt"
+	"io"
 
 	"github.com/taekwondodev/crypto-simulator/pkg/utxo"
 )
@@ -62,22 +63,54 @@ func (tx *Transaction) IsCoinBase() bool {
 
 func (tx *Transaction) Serialize() ([]byte, error) {
 	var buffer bytes.Buffer
-	encoder := gob.NewEncoder(&buffer)
-	err := encoder.Encode(tx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize transaction: %w", err)
+
+	buffer.Write(tx.ID)
+
+	binary.Write(&buffer, binary.LittleEndian, int32(len(tx.Inputs)))
+	for _, input := range tx.Inputs {
+		inputBytes, err := input.Serialize()
+		if err != nil {
+			return nil, err
+		}
+		binary.Write(&buffer, binary.LittleEndian, int32(len(inputBytes)))
+		buffer.Write(inputBytes)
 	}
+
+	binary.Write(&buffer, binary.LittleEndian, int32(len(tx.Outputs)))
+	for _, output := range tx.Outputs {
+		outputBytes, err := output.Serialize()
+		if err != nil {
+			return nil, err
+		}
+		binary.Write(&buffer, binary.LittleEndian, int32(len(outputBytes)))
+		buffer.Write(outputBytes)
+	}
+
 	return buffer.Bytes(), nil
 }
 
 func Deserialize(data []byte) (*Transaction, error) {
-	var tx Transaction
-	decoder := gob.NewDecoder(bytes.NewReader(data))
-	err := decoder.Decode(&tx)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to deserialize transaction: %w", err)
+	buffer := bytes.NewReader(data)
+	tx := &Transaction{}
+
+	tx.ID = make([]byte, 32)
+	if _, err := io.ReadFull(buffer, tx.ID); err != nil {
+		return nil, fmt.Errorf("failed to deserialize ID: %w", err)
 	}
-	return &tx, nil
+
+	inputs, err := deserializeInputs(buffer)
+	if err != nil {
+		return nil, err
+	}
+	tx.Inputs = inputs
+
+	outputs, err := deserializeOutputs(buffer)
+	if err != nil {
+		return nil, err
+	}
+	tx.Outputs = outputs
+
+	return tx, nil
 }
 
 func (tx *Transaction) Print(indent string) {
@@ -90,4 +123,60 @@ func (tx *Transaction) Print(indent string) {
 	for i, output := range tx.Outputs {
 		fmt.Printf("%s    Output %d: %d coins\n", indent, i, output.Value)
 	}
+}
+
+func deserializeInputs(buffer *bytes.Reader) ([]utxo.TxInput, error) {
+	var inputCount int32
+	if err := binary.Read(buffer, binary.LittleEndian, &inputCount); err != nil {
+		return nil, fmt.Errorf("failed to deserialize input count: %w", err)
+	}
+
+	inputs := make([]utxo.TxInput, inputCount)
+	for i := int32(0); i < inputCount; i++ {
+		var inputBytesLen int32
+		if err := binary.Read(buffer, binary.LittleEndian, &inputBytesLen); err != nil {
+			return nil, fmt.Errorf("failed to deserialize input bytes length: %w", err)
+		}
+
+		inputBytes := make([]byte, inputBytesLen)
+		if _, err := io.ReadFull(buffer, inputBytes); err != nil {
+			return nil, fmt.Errorf("failed to deserialize input bytes: %w", err)
+		}
+
+		input, err := utxo.DeserializeTxInput(inputBytes)
+		if err != nil {
+			return nil, err
+		}
+		inputs[i] = *input
+	}
+
+	return inputs, nil
+}
+
+func deserializeOutputs(buffer *bytes.Reader) ([]utxo.TxOutput, error) {
+	var outputCount int32
+	if err := binary.Read(buffer, binary.LittleEndian, &outputCount); err != nil {
+		return nil, fmt.Errorf("failed to deserialize output count: %w", err)
+	}
+
+	outputs := make([]utxo.TxOutput, outputCount)
+	for i := int32(0); i < outputCount; i++ {
+		var outputBytesLen int32
+		if err := binary.Read(buffer, binary.LittleEndian, &outputBytesLen); err != nil {
+			return nil, fmt.Errorf("failed to deserialize output bytes length: %w", err)
+		}
+
+		outputBytes := make([]byte, outputBytesLen)
+		if _, err := io.ReadFull(buffer, outputBytes); err != nil {
+			return nil, fmt.Errorf("failed to deserialize output bytes: %w", err)
+		}
+
+		output, err := utxo.DeserializeTxOutput(outputBytes)
+		if err != nil {
+			return nil, err
+		}
+		outputs[i] = *output
+	}
+
+	return outputs, nil
 }

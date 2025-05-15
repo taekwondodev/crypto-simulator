@@ -3,9 +3,10 @@ package block
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/gob"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -77,6 +78,7 @@ func (b *Block) IsValid(prevBlock *Block) error {
 		return err
 	}
 	if !bytes.Equal(calculatedHash, b.Hash) {
+		b.Print()
 		return fmt.Errorf("Hash does not match, block compromised")
 	}
 
@@ -113,32 +115,139 @@ func (b *Block) calculateHash() ([]byte, error) {
 
 func serializeTransactions(txs []*transaction.Transaction) ([]byte, error) {
 	var buffer bytes.Buffer
-	encoder := gob.NewEncoder(&buffer)
-	err := encoder.Encode(txs)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to serialize transactions: %w", err)
+
+	binary.Write(&buffer, binary.LittleEndian, int32(len(txs)))
+
+	for _, tx := range txs {
+		txBytes, err := tx.Serialize()
+		if err != nil {
+			return nil, err
+		}
+
+		binary.Write(&buffer, binary.LittleEndian, int32(len(txBytes)))
+		buffer.Write(txBytes)
 	}
+
 	return buffer.Bytes(), nil
 }
 
 func (b *Block) Serialize() ([]byte, error) {
 	var buffer bytes.Buffer
-	encoder := gob.NewEncoder(&buffer)
-	err := encoder.Encode(b)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to serialize block: %w", err)
+
+	binary.Write(&buffer, binary.LittleEndian, int32(b.Height))
+	binary.Write(&buffer, binary.LittleEndian, b.Timestamp)
+
+	binary.Write(&buffer, binary.LittleEndian, int32(len(b.PreviousHash)))
+	if len(b.PreviousHash) > 0 {
+		buffer.Write(b.PreviousHash)
 	}
+
+	txBytes, err := serializeTransactions(b.Transactions)
+	if err != nil {
+		return nil, err
+	}
+	binary.Write(&buffer, binary.LittleEndian, int32(len(txBytes)))
+	buffer.Write(txBytes)
+
+	binary.Write(&buffer, binary.LittleEndian, int32(b.Nonce))
+	binary.Write(&buffer, binary.LittleEndian, int32(b.Difficulty))
+
+	binary.Write(&buffer, binary.LittleEndian, int32(len(b.Hash)))
+	buffer.Write(b.Hash)
+
 	return buffer.Bytes(), nil
 }
 
 func Deserialize(data []byte) (*Block, error) {
-	var block Block
-	decoder := gob.NewDecoder(bytes.NewReader(data))
-	err := decoder.Decode(&block)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to deserialize block: %w", err)
+	buffer := bytes.NewReader(data)
+	block := &Block{}
+
+	var height int32
+	if err := binary.Read(buffer, binary.LittleEndian, &height); err != nil {
+		return nil, fmt.Errorf("failed to deserialize height: %w", err)
 	}
-	return &block, nil
+	block.Height = int(height)
+
+	if err := binary.Read(buffer, binary.LittleEndian, &block.Timestamp); err != nil {
+		return nil, fmt.Errorf("failed to deserialize timestamp: %w", err)
+	}
+
+	var prevHashLen int32
+	if err := binary.Read(buffer, binary.LittleEndian, &prevHashLen); err != nil {
+		return nil, fmt.Errorf("failed to deserialize prevHash length: %w", err)
+	}
+	if prevHashLen > 0 {
+		block.PreviousHash = make([]byte, prevHashLen)
+		if _, err := io.ReadFull(buffer, block.PreviousHash); err != nil {
+			return nil, fmt.Errorf("failed to deserialize prevHash: %w", err)
+		}
+	}
+	var txBytesLen int32
+	if err := binary.Read(buffer, binary.LittleEndian, &txBytesLen); err != nil {
+		return nil, fmt.Errorf("failed to deserialize tx bytes length: %w", err)
+	}
+	txBytes := make([]byte, txBytesLen)
+	if _, err := io.ReadFull(buffer, txBytes); err != nil {
+		return nil, fmt.Errorf("failed to deserialize tx bytes: %w", err)
+	}
+
+	txs, err := deserializeTransactions(txBytes)
+	if err != nil {
+		return nil, err
+	}
+	block.Transactions = txs
+
+	var nonce, difficulty int32
+	if err := binary.Read(buffer, binary.LittleEndian, &nonce); err != nil {
+		return nil, fmt.Errorf("failed to deserialize nonce: %w", err)
+	}
+	block.Nonce = int(nonce)
+
+	if err := binary.Read(buffer, binary.LittleEndian, &difficulty); err != nil {
+		return nil, fmt.Errorf("failed to deserialize difficulty: %w", err)
+	}
+	block.Difficulty = int(difficulty)
+
+	var hashLen int32
+	if err := binary.Read(buffer, binary.LittleEndian, &hashLen); err != nil {
+		return nil, fmt.Errorf("failed to deserialize hash length: %w", err)
+	}
+	block.Hash = make([]byte, hashLen)
+	if _, err := io.ReadFull(buffer, block.Hash); err != nil {
+		return nil, fmt.Errorf("failed to deserialize hash: %w", err)
+	}
+
+	return block, nil
+}
+
+func deserializeTransactions(data []byte) ([]*transaction.Transaction, error) {
+	buffer := bytes.NewReader(data)
+
+	var count int32
+	if err := binary.Read(buffer, binary.LittleEndian, &count); err != nil {
+		return nil, fmt.Errorf("failed to deserialize tx count: %w", err)
+	}
+
+	txs := make([]*transaction.Transaction, count)
+	for i := int32(0); i < count; i++ {
+		var txBytesLen int32
+		if err := binary.Read(buffer, binary.LittleEndian, &txBytesLen); err != nil {
+			return nil, fmt.Errorf("failed to deserialize tx bytes length: %w", err)
+		}
+
+		txBytes := make([]byte, txBytesLen)
+		if _, err := io.ReadFull(buffer, txBytes); err != nil {
+			return nil, fmt.Errorf("failed to deserialize tx bytes: %w", err)
+		}
+
+		tx, err := transaction.Deserialize(txBytes)
+		if err != nil {
+			return nil, err
+		}
+		txs[i] = tx
+	}
+
+	return txs, nil
 }
 
 func (b *Block) Print() {

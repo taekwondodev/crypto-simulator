@@ -126,11 +126,10 @@ func (a *App) mineNewBlock() error {
 		return err
 	}
 
+	fmt.Printf("Block mined! Height: %d\n", newBlock.Height)
+
 	invMsg := p2p.NewInvMessage([][]byte{newBlock.Hash})
 	a.node.Broadcast(invMsg)
-
-	fmt.Printf("Block mined! Hash: %x, Height: %d, Transactions: %d\n",
-		newBlock.Hash, newBlock.Height, len(newBlock.Transactions))
 
 	return nil
 }

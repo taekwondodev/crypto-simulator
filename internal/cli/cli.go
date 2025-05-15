@@ -4,8 +4,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/peterh/liner"
 	"github.com/taekwondodev/crypto-simulator/internal/blockchain"
 	"github.com/taekwondodev/crypto-simulator/internal/mempool"
 	"github.com/taekwondodev/crypto-simulator/internal/p2p"
@@ -19,15 +22,27 @@ type CLI struct {
 	wallets         map[string]*Wallet
 	commandHandlers map[string]func([]string) error
 	done            chan struct{}
+	line            *liner.State
+	historyFile     string
 }
 
 func NewCLI(bc *blockchain.Blockchain, mp *mempool.Mempool, node *p2p.Node) *CLI {
+	line := liner.NewLiner()
+	historyFile := filepath.Join(os.TempDir(), ".crypto_simulator_history")
+
 	cli := &CLI{
-		bc:      bc,
-		mp:      mp,
-		node:    node,
-		wallets: make(map[string]*Wallet),
-		done:    make(chan struct{}),
+		bc:          bc,
+		mp:          mp,
+		node:        node,
+		wallets:     make(map[string]*Wallet),
+		done:        make(chan struct{}),
+		line:        line,
+		historyFile: historyFile,
+	}
+
+	if f, err := os.Open(historyFile); err == nil {
+		line.ReadHistory(f)
+		f.Close()
 	}
 
 	cli.commandHandlers = map[string]func([]string) error{
@@ -56,9 +71,10 @@ func (cli *CLI) Done() <-chan struct{} {
 func (cli *CLI) Run() {
 	fmt.Println("Blockchain CLI")
 	fmt.Println("Type 'help' for commands")
+	defer cli.cleanupLiner()
 
 	for {
-		input := askFor("> ")
+		input := cli.askFor("> ")
 		if input == "" {
 			continue
 		}
@@ -86,22 +102,42 @@ func (cli *CLI) Run() {
 
 func (cli *CLI) printHelp() error {
 	fmt.Println("Commands:")
-	fmt.Println("  createwallet         			 - Create a new wallet")
-	fmt.Println("  listwallet          				 - List all wallets")
-	fmt.Println("  balance <name>       			 - Get balance for wallet")
-	fmt.Println("  send <from> <to-address> <amount> - Send coins from one wallet to another")
-	fmt.Println("  mine                 			 - Mine a new block with transactions from mempool")
-	fmt.Println("  blockchain           			 - Print the blockchain")
-	fmt.Println("  mempool              			 - Show transactions in mempool")
-	fmt.Println("  peers                			 - List connected peers")
-	fmt.Println("  connect <address>    			 - Connect to a peer")
-	fmt.Println("  exit                 			 - Exit the program")
-	fmt.Println("  tx <txid>            			 - View transaction details")
+	commands := []struct {
+		cmd  string
+		desc string
+	}{
+		{"createwallet", "Create a new wallet"},
+		{"listwallet", "List all wallets"},
+		{"balance <name>", "Get balance for wallet"},
+		{"send <from> <to-address> <amount>", "Send coins from one wallet to another"},
+		{"mine", "Mine a new block with transactions from mempool"},
+		{"blockchain", "Print the blockchain"},
+		{"mempool", "Show transactions in mempool"},
+		{"peers", "List connected peers"},
+		{"connect <address>", "Connect to a peer"},
+		{"exit", "Exit the program"},
+		{"tx <txid>", "View transaction details"},
+	}
+
+	// Find the longest command for proper padding
+	maxLen := 0
+	for _, cmd := range commands {
+		if len(cmd.cmd) > maxLen {
+			maxLen = len(cmd.cmd)
+		}
+	}
+
+	// Print each command with consistent formatting
+	format := "  %-" + fmt.Sprintf("%d", maxLen+2) + "s- %s\n"
+	for _, cmd := range commands {
+		fmt.Printf(format, cmd.cmd, cmd.desc)
+	}
+
 	return nil
 }
 
 func (cli *CLI) createWallet() error {
-	name := askFor("Enter wallet name: ")
+	name := cli.askFor("Enter wallet name: ")
 	if name == "" {
 		return fmt.Errorf("wallet name cannot be empty")
 	}
@@ -187,14 +223,14 @@ func (cli *CLI) handleSend(parts []string) error {
 	if err != nil {
 		return err
 	}
+	if cli.mp.Add(tx) {
+		fmt.Printf("Transaction created: %x\n", tx.ID)
+		fmt.Printf("Sent %d coins from %s to %s\n", amount, fromName, toAddress)
+		fmt.Println("Transaction is in mempool, waiting to be mined")
 
-	cli.mp.Add(tx)
-	invMsg := p2p.NewInvMessage([][]byte{tx.ID})
-	cli.node.Broadcast(invMsg)
-
-	fmt.Printf("Transaction created: %x\n", tx.ID)
-	fmt.Printf("Sent %d coins from %s to %s\n", amount, fromName, toAddress)
-	fmt.Println("Transaction is in mempool, waiting to be mined")
+		invMsg := p2p.NewInvMessage([][]byte{tx.ID})
+		cli.node.Broadcast(invMsg)
+	}
 	return nil
 }
 
@@ -250,10 +286,10 @@ func (cli *CLI) showMempool() error {
 	count := cli.mp.Count()
 
 	if count == 0 {
-		fmt.Printf("Mempool is empty")
+		fmt.Printf("Mempool is empty\n")
+	} else {
+		fmt.Printf("Mempool has %d transaction(s)\n", count)
 	}
-
-	fmt.Printf("Mempool has %d transaction(s)\n", count)
 	return nil
 }
 
@@ -328,7 +364,7 @@ func (cli *CLI) handleMiningReward() (string, error) {
 	for name := range cli.wallets {
 		fmt.Println(" -", name)
 	}
-	walletName := askFor("Enter wallet name to receive mining reward: ")
+	walletName := cli.askFor("Enter wallet name to receive mining reward: ")
 
 	wallet, exists := cli.wallets[walletName]
 	if !exists {

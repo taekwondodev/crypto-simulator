@@ -14,7 +14,6 @@ const shards = 16
 
 type Mempool struct {
 	shards []*mempoolShard
-	txChan chan *transaction.Transaction
 	bc     *blockchain.Blockchain
 }
 
@@ -26,13 +25,11 @@ type mempoolShard struct {
 func New(bc *blockchain.Blockchain) *Mempool {
 	m := &Mempool{
 		shards: make([]*mempoolShard, shards),
-		txChan: make(chan *transaction.Transaction, 10000),
 		bc:     bc,
 	}
 	for i := range m.shards {
 		m.shards[i] = &mempoolShard{txs: make(map[string]*transaction.Transaction)}
 	}
-	go m.processTransactions()
 	return m
 }
 
@@ -42,19 +39,15 @@ func (m *Mempool) getShard(txID string) *mempoolShard {
 	return m.shards[h.Sum32()%shards]
 }
 
-func (m *Mempool) Add(tx *transaction.Transaction) {
-	m.txChan <- tx
-}
-
-func (m *Mempool) processTransactions() {
-	for tx := range m.txChan {
-		if m.ValidateTransaction(tx) {
-			shard := m.getShard(hex.EncodeToString(tx.ID))
-			shard.mu.Lock()
-			shard.txs[hex.EncodeToString(tx.ID)] = tx
-			shard.mu.Unlock()
-		}
+func (m *Mempool) Add(tx *transaction.Transaction) bool {
+	if m.ValidateTransaction(tx) {
+		shard := m.getShard(hex.EncodeToString(tx.ID))
+		shard.mu.Lock()
+		defer shard.mu.Unlock()
+		shard.txs[hex.EncodeToString(tx.ID)] = tx
+		return true
 	}
+	return false
 }
 
 func (m *Mempool) ValidateTransaction(tx *transaction.Transaction) bool {

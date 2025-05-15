@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"bufio"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -13,11 +13,26 @@ import (
 
 type Wallet = wallet.Wallet
 
-func askFor(prompt string) string {
-	fmt.Print(prompt)
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
-	return scanner.Text()
+func (cli *CLI) askFor(prompt string) string {
+	input, err := cli.line.Prompt(prompt)
+	if err != nil {
+		return ""
+	}
+
+	if input != "" {
+		cli.line.AppendHistory(input)
+	}
+
+	return input
+}
+
+func (cli *CLI) cleanupLiner() {
+	if f, err := os.Create(cli.historyFile); err == nil {
+		cli.line.WriteHistory(f)
+		f.Close()
+	}
+
+	cli.line.Close()
 }
 
 func getRequiredParam(parts []string, position int, usage string) (string, bool) {
@@ -45,7 +60,7 @@ func createTransaction(fromWallet *Wallet, toAddress string, amount int, utxos [
 		return nil, err
 	}
 
-	outputs := createOutputs(fromWallet.GetAddress(), toAddress, amount, collected)
+	outputs := createOutputs(fromWallet.Address, toAddress, amount, collected)
 
 	return transaction.New(inputs, outputs)
 }
@@ -77,18 +92,23 @@ func selectInputs(wallet *Wallet, availableUTXOs []*utxo.UTXO, amount int) ([]ut
 	return inputs, collected, nil
 }
 
-func createOutputs(fromAddress, toAddress string, amount, collected int) []utxo.TxOutput {
+func createOutputs(fromAddress []byte, toAddress string, amount, collected int) []utxo.TxOutput {
 	var outputs []utxo.TxOutput
+
+	toBytes, err := hex.DecodeString(toAddress)
+	if err != nil {
+		toBytes = []byte(toAddress)
+	}
 
 	outputs = append(outputs, utxo.TxOutput{
 		Value:      amount,
-		PubKeyHash: []byte(toAddress),
+		PubKeyHash: toBytes,
 	})
 
 	if collected > amount {
 		outputs = append(outputs, utxo.TxOutput{
 			Value:      collected - amount,
-			PubKeyHash: []byte(fromAddress),
+			PubKeyHash: fromAddress,
 		})
 	}
 

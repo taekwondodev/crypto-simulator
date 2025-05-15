@@ -109,8 +109,9 @@ func (n *Node) handleTransaction(msg *Message) error {
 		if n.mempool.Get(txID) != nil {
 			return nil
 		}
-		n.mempool.Add(tx)
-		n.Broadcast(msg)
+		if n.mempool.Add(tx) {
+			n.Broadcast(msg)
+		}
 	}
 
 	return nil
@@ -253,7 +254,6 @@ func (n *Node) sendRequestedData(hash []byte, conn net.Conn) error {
 	txID := hex.EncodeToString(hash)
 	tx := n.mempool.Get(txID)
 	if tx != nil {
-		log.Printf("Sending requested transaction from mempool: %s", txID)
 		serialize, err := tx.Serialize()
 		if err != nil {
 			return err
@@ -264,7 +264,6 @@ func (n *Node) sendRequestedData(hash []byte, conn net.Conn) error {
 	// If not in mempool, check if it's a transaction in the blockchain
 	tx = n.blockchain.FindTransaction(hash)
 	if tx != nil {
-		log.Printf("Sending requested transaction from blockchain: %s", txID)
 		serialize, err := tx.Serialize()
 		if err != nil {
 			return err

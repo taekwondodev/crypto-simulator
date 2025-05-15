@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 
@@ -17,9 +18,13 @@ type Transaction struct {
 }
 
 func NewCoinBaseTx(to string, value int) (*Transaction, error) {
+	toBytes, err := hex.DecodeString(to)
+	if err != nil {
+		toBytes = []byte(to)
+	}
 	tx := &Transaction{
 		Outputs: []utxo.TxOutput{
-			{Value: value, PubKeyHash: []byte(to)},
+			{Value: value, PubKeyHash: toBytes},
 		},
 	}
 

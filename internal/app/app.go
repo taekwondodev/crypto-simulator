@@ -72,8 +72,9 @@ func (a *App) startInteractiveMode() {
 	go cliHandler.Run()
 
 	select {
-	case <-cliHandler.Done():
+	case <-cliHandler.Done:
 	case <-a.signals:
+		close(cliHandler.Done)
 	}
 	fmt.Println("\nShutting down...")
 }

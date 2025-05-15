@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"bytes"
+	"encoding/hex"
 	"strconv"
 	"time"
 
@@ -159,12 +160,17 @@ func getUTXOs(tx *bbolt.Tx, address string, utxos *[]*utxo.UTXO) error {
 	b := tx.Bucket([]byte(utxoBucket))
 	c := b.Cursor()
 
+	addressBytes, err := hex.DecodeString(address)
+	if err != nil {
+		addressBytes = []byte(address)
+	}
+
 	for k, v := c.First(); k != nil; k, v = c.Next() {
 		utxo, err := utxo.Deserialize(v)
 		if err != nil {
 			return err
 		}
-		if bytes.Equal(utxo.Output.PubKeyHash, []byte(address)) {
+		if bytes.Equal(utxo.Output.PubKeyHash, addressBytes) {
 			*utxos = append(*utxos, utxo)
 		}
 	}

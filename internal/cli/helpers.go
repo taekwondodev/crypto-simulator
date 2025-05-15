@@ -60,7 +60,7 @@ func createTransaction(fromWallet *Wallet, toAddress string, amount int, utxos [
 		return nil, err
 	}
 
-	outputs := createOutputs(fromWallet.Address, toAddress, amount, collected)
+	outputs := createOutputs(fromWallet.GetAddress(), toAddress, amount, collected)
 
 	return transaction.New(inputs, outputs)
 }
@@ -92,7 +92,7 @@ func selectInputs(wallet *Wallet, availableUTXOs []*utxo.UTXO, amount int) ([]ut
 	return inputs, collected, nil
 }
 
-func createOutputs(fromAddress []byte, toAddress string, amount, collected int) []utxo.TxOutput {
+func createOutputs(fromAddress, toAddress string, amount, collected int) []utxo.TxOutput {
 	var outputs []utxo.TxOutput
 
 	toBytes, err := hex.DecodeString(toAddress)
@@ -106,9 +106,13 @@ func createOutputs(fromAddress []byte, toAddress string, amount, collected int) 
 	})
 
 	if collected > amount {
+		fromBytes, err := hex.DecodeString(fromAddress)
+		if err != nil {
+			fromBytes = []byte(fromAddress)
+		}
 		outputs = append(outputs, utxo.TxOutput{
 			Value:      collected - amount,
-			PubKeyHash: fromAddress,
+			PubKeyHash: fromBytes,
 		})
 	}
 

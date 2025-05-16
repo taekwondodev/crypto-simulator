@@ -83,7 +83,7 @@ func (a *App) startAutomaticMode() {
 	fmt.Println("Running in non-interactive mode")
 	fmt.Printf("Mining blocks automatically every %d seconds\n",
 		int(a.config.MiningInterval.Seconds()))
-	fmt.Println("Use './crypto-simulator -interactive for CLI mode")
+	fmt.Println("Use 'go run cmd/main.go -interactive for CLI mode")
 
 	go a.automaticMining()
 

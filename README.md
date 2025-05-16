@@ -68,9 +68,6 @@ git clone https://github.com/taekwondodev/crypto-simulator.git
 cd crypto-simulator
 touch blockchain.db
 touch fork.db
-go mod download
-
-go build -o crypto-simulator ./cmd
 ```
 
 ## Usage
@@ -78,13 +75,13 @@ go build -o crypto-simulator ./cmd
 ### Start in Interactive Mode
 
 ```bash
-./crypto-simulator -interactive -port=3000
+go run cmd/main.go -interactive -port=3000
 ```
 
 ### Start in Automatic Mining Mode
 
 ```bash
-./crypto-simulator -port=3001 -mining-interval=30
+go run cmd/main.go -port=3001 -mining-interval=30
 ```
 
 ### Available Flags

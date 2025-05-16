@@ -4,7 +4,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/taekwondodev/crypto-simulator/pkg/transaction"
 	"github.com/taekwondodev/crypto-simulator/pkg/utxo"
@@ -146,4 +148,28 @@ func executeCommand(f func() error) {
 	if err := f(); err != nil {
 		fmt.Printf("Error: %v\n", err)
 	}
+}
+
+func getSecureHistoryFilePath() string {
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		configDir := filepath.Join(homeDir, ".crypto-simulator")
+		if err := os.MkdirAll(configDir, 0700); err == nil {
+			return filepath.Join(configDir, "history")
+		}
+	}
+
+	tempDir, err := os.MkdirTemp("", "crypto-simulator-")
+	if err == nil {
+		os.Chmod(tempDir, 0700)
+		return filepath.Join(tempDir, "history")
+	}
+
+	historyFile := ".crypto_simulator_history." + strconv.FormatInt(time.Now().Unix(), 10)
+	f, err := os.OpenFile(historyFile, os.O_CREATE|os.O_WRONLY, 0600)
+	if err == nil {
+		f.Close()
+	}
+
+	return historyFile
 }

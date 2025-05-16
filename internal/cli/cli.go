@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/peterh/liner"
@@ -28,7 +27,7 @@ type CLI struct {
 
 func NewCLI(bc *blockchain.Blockchain, mp *mempool.Mempool, node *p2p.Node) *CLI {
 	line := liner.NewLiner()
-	historyFile := filepath.Join(os.TempDir(), ".crypto_simulator_history")
+	historyFile := getSecureHistoryFilePath()
 
 	cli := &CLI{
 		bc:          bc,

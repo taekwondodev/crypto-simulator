@@ -94,6 +94,7 @@ func (n *Node) handleBlock(msg *Message, conn net.Conn) error {
 		return err
 	}
 
+	n.removeFromMempool(newBlock)
 	log.Printf("Added new block to the blockchain at height: %d\n", newBlock.Height)
 	return nil
 }
@@ -235,6 +236,18 @@ func (n *Node) collectUnknownBlockHashes(hashes [][]byte) ([][]byte, error) {
 	}
 
 	return unknownHashes, nil
+}
+
+func (n *Node) removeFromMempool(newBlock *block.Block) {
+	for _, tx := range newBlock.Transactions {
+		if !tx.IsCoinBase() {
+			txID := hex.EncodeToString(tx.ID)
+			if n.mempool.Get(txID) != nil {
+				n.mempool.Remove(txID)
+				log.Printf("Transaction %s removed from mempool (already mined!)", txID)
+			}
+		}
+	}
 }
 
 func (n *Node) sendRequestedData(hash []byte, conn net.Conn) error {

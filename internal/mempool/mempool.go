@@ -59,6 +59,13 @@ func (m *Mempool) ValidateTransaction(tx *transaction.Transaction) bool {
 	return m.bc.VerifyTransaction(tx)
 }
 
+func (m *Mempool) Remove(txID string) {
+	shard := m.getShard(txID)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	delete(shard.txs, txID)
+}
+
 func (m *Mempool) Flush() []*transaction.Transaction {
 	result := make([]*transaction.Transaction, 0, 100) // Pre-allocate for reasonable batch size
 

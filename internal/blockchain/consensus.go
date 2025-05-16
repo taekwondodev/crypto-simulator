@@ -251,7 +251,7 @@ func (bc *Blockchain) findFirstMatchingBlock(startBlock *block.Block, blocksMap 
 
 		// Check if we've reached genesis without finding a match
 		if current.PreviousHash == nil {
-			return nil, fmt.Errorf("no common ancestor found between chains (reached genesis)")
+			return current, nil
 		}
 
 		// Move to previous block
